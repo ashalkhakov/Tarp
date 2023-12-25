@@ -7,16 +7,6 @@ namespace Tarp
     public class Sample
     {
         /*
-        public static bool Example(bool A, bool B, bool C, bool D)
-        {
-            return (A && B) || C;
-        }
-
-        public static bool Example2(bool A, bool B)
-        {
-            return A && !B;
-        }
-
         public static int FactLoop(int x)
         {
             var r = 1;

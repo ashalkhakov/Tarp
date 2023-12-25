@@ -157,9 +157,6 @@ public class McDcVisitor : CSharpSyntaxVisitor
             {
                 // just wrap the existing condition or decision
                 // FIXME: wouldn't this break? if this is the sole condition, then condition and decision will be slightly different
-                var e = _stack.Pop();
-                e.SyntaxNode = parens;
-                _stack.Push(e);
             }
             else
             {
