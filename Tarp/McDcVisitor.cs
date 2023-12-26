@@ -155,8 +155,7 @@ public class McDcVisitor : CSharpSyntaxVisitor
             }
             else if (node is ParenthesizedExpressionSyntax parens)
             {
-                // just wrap the existing condition or decision
-                // FIXME: wouldn't this break? if this is the sole condition, then condition and decision will be slightly different
+                // skip it completely
             }
             else
             {

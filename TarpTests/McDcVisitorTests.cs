@@ -9,6 +9,9 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis;
 using FluentAssertions;
 using Tarp.Types;
+using static Tarp.McDcFunctions;
+using System.Drawing;
+using System.Diagnostics;
 
 namespace Tarp.Tests
 {
@@ -68,38 +71,29 @@ namespace Tarp.Tests
 
             var roots = visitor.GetRoots();
             roots.Should().HaveCount(2);
-            roots[0].Kind.Should().Be(McDcNodeKind.Decision);
-            roots[0].SyntaxNode.ToFullString().Should().BeEquivalentTo("A && (B ? C : D)");
-            roots[0].Children.Should().HaveCount(2);
 
-            roots[0].Children[0].SyntaxNode.ToFullString().Should().BeEquivalentTo("A ");
-            roots[0].Children[0].Kind.Should().Be(McDcNodeKind.Condition);
-            roots[0].Children[0].Children.Should().BeNull();
+            McDcTreeOfNode(roots[0]).Should().BeEquivalentTo(
+                new McDcDec("A && (B ? C : D)", new()
+                {
+                    new McDcCond("A"),
+                    new McDcDec("B ? C : D", new()
+                    {
+                        new McDcCond("B"),
+                        new McDcCond("C"),
+                        new McDcCond("D")
+                    })
+                }));
 
-            roots[0].Children[1].SyntaxNode.ToFullString().Should().BeEquivalentTo("B ? C : D");
-            roots[0].Children[1].Kind.Should().Be(McDcNodeKind.Decision);
-            roots[0].Children[1].Children.Should().HaveCount(3);
-            // TODO: check that B, C, D are the children
-
-            roots[1].Kind.Should().Be(McDcNodeKind.Decision);
-            roots[1].SyntaxNode.ToFullString().Should().BeEquivalentTo("a == (b || c)");
-            roots[1].Children.Should().HaveCount(2);
-
-            roots[1].Children[0].SyntaxNode.ToFullString().Should().BeEquivalentTo("a ");
-            roots[1].Children[0].Kind.Should().Be(McDcNodeKind.Condition);
-            roots[1].Children[0].Children.Should().BeNull();
-
-            roots[1].Children[1].SyntaxNode.ToFullString().Should().BeEquivalentTo("b || c");
-            roots[1].Children[1].Kind.Should().Be(McDcNodeKind.Decision);
-            roots[1].Children[1].Children.Should().HaveCount(2);
-            
-            roots[1].Children[1].Children[0].SyntaxNode.ToFullString().Should().BeEquivalentTo("b ");
-            roots[1].Children[1].Children[0].Kind.Should().Be(McDcNodeKind.Condition);
-            roots[1].Children[1].Children[0].Children.Should().BeNull();
-            
-            roots[1].Children[1].Children[1].SyntaxNode.ToFullString().Should().BeEquivalentTo("c");
-            roots[1].Children[1].Children[1].Kind.Should().Be(McDcNodeKind.Condition);
-            roots[1].Children[1].Children[1].Children.Should().BeNull();
+            McDcTreeOfNode(roots[1]).Should().BeEquivalentTo(
+                new McDcDec("a == (b || c)", new()
+                {
+                    new McDcCond("a "),
+                    new McDcDec("b || c", new()
+                    {
+                        new McDcCond("b"),
+                        new McDcCond("c")
+                    })
+                }));
         }
 
         [TestMethod]
@@ -112,33 +106,38 @@ namespace Tarp.Tests
             var roots = visitor.GetRoots();
             roots.Should().HaveCount(1);
 
-            CheckNode(roots[0], McDcNodeKind.Decision, "(A || B) && (C || D)", 2);
-            
-            CheckNode(roots[0].Children[0], McDcNodeKind.Decision, "A || B", 2);
-            CheckNode(roots[0].Children[0].Children[0], McDcNodeKind.Condition, "A ", 0);
-            CheckNode(roots[0].Children[0].Children[1], McDcNodeKind.Condition, "B", 0);
-
-            CheckNode(roots[0].Children[1], McDcNodeKind.Decision, "C || D", 2);
-            CheckNode(roots[0].Children[1].Children[0], McDcNodeKind.Condition, "C ", 0);
-            CheckNode(roots[0].Children[1].Children[1], McDcNodeKind.Condition, "D", 0);
+            McDcTreeOfNode(roots[0]).Should().BeEquivalentTo(
+                new McDcDec("(A || B) && (C || D)", new()
+                {
+                    new McDcDec("A || B", new() { new McDcCond("A"), new McDcCond("B") }),
+                    new McDcDec("C || D", new() { new McDcCond("C"), new McDcCond("D") })
+                }));
         }
 
-        void CheckNode(McDcNode node, McDcNodeKind kind, string syntaxNode, int numChildren)
+        public abstract record McDcTree();
+        public record McDcCond(string Expr) : McDcTree();
+        public record McDcDec(string Expr, List<McDcTree> Children) : McDcTree();
+
+        private McDcTree McDcTreeOfNode(McDcNode node)
         {
-            node.Kind.Should().Be(kind);
-            node.SyntaxNode.ToFullString().Should().BeEquivalentTo(syntaxNode);
-            if (kind == McDcNodeKind.Condition)
+            Debug.Assert(node != null);
+            
+            if (node.Kind == McDcNodeKind.Condition)
             {
-                numChildren.Should().Be(0);
-                node.Children.Should().BeNull();
+                Debug.Assert(node.Children == null);
+                
+                return new McDcCond(node.SyntaxNode.ToFullString());
             }
             else
             {
-                node.Children.Should().HaveCount(numChildren);
+                Debug.Assert(node.Children != null && node.Children.Count > 0);
+
+                var children = node.Children.Select(c => McDcTreeOfNode(c));
+                return new McDcDec(node.SyntaxNode.ToFullString(), children.ToList());
             }
         }
 
-        void CheckMarkerFunction(McDcFunctions.MarkerFunction f, int falseBit, bool falseDone, int falseMask, int trueBit, bool trueDone, int trueMask, string node)
+        void CheckMarkerFunction(McDcFunctions.MarkerFunction f, int falseBit, bool falseDone, int falseMask, int trueBit, bool trueDone, int trueMask, string node, PathElement path)
         {
             f.FalseBit.Should().Be(falseBit);
             f.FalseDone.Should().Be(falseDone);
@@ -147,6 +146,7 @@ namespace Tarp.Tests
             f.TrueDone.Should().Be(trueDone);
             f.TrueMask.Should().Be(trueMask);
             f.Node.SyntaxNode.ToFullString().Should().BeEquivalentTo(node);
+            PathElementOfElem(f.Path).Should().BeEquivalentTo(path);
         }
 
         [TestMethod]
@@ -162,11 +162,46 @@ namespace Tarp.Tests
             var markerFunctions = functions.CreateMarkers(roots[0]);
 
             markerFunctions.Should().HaveCount(3);
-            CheckMarkerFunction(markerFunctions[0], 2, true, -1, 1, false, -1, "a == 5");
-            // TODO:   path {side=left,up=null,node="a == 5 && (b || c)"}
-            CheckMarkerFunction(markerFunctions[1], 8, false, -1, 4, true, -1, "b ");
-            // TOOD: path {side=left,up={side=right,up=null,node="a == 5 && (b || c)"},node="b || c"}
-            CheckMarkerFunction(markerFunctions[2], 32, true, -4, 16, true, -13, "c");
+            CheckMarkerFunction(markerFunctions[0], 2, true, -1, 1, false, -1, "a == 5",
+                new PathElement(
+                    "(a == 5) && (b || c)",
+                    SideOfParent.Left,
+                    null));
+            CheckMarkerFunction(markerFunctions[1], 8, false, -1, 4, true, -1, "b ",
+                new PathElement
+                (
+                    "b || c", 
+                    SideOfParent.Left, 
+                    new PathElement
+                    (
+                        "(a == 5) && (b || c)", 
+                        SideOfParent.Right,
+                        null
+                    )
+                ));
+            CheckMarkerFunction(markerFunctions[2], 32, true, -4, 16, true, -13, "c",
+                new PathElement(
+                    "b || c", 
+                    SideOfParent.Right, 
+                    new PathElement
+                    (
+                        "(a == 5) && (b || c)", 
+                        SideOfParent.Right, 
+                        null
+                    )
+                ));
         }
+
+        private PathElement PathElementOfElem(PathElem? p)
+        {
+            if (p == null)
+            {
+                return null;
+            }
+            var x = new PathElement(p.Expr.SyntaxNode.ToFullString(), p.Side, PathElementOfElem(p.Up));
+            return x;
+        }
+
+        public record PathElement(string Expr, SideOfParent side, PathElement? Up);
     }
 }
