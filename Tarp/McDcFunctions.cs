@@ -4,20 +4,22 @@ using System.Collections.Generic;
 using Tarp.Types;
 using Microsoft.CodeAnalysis;
 using System.Diagnostics;
-using System.IO;
 
 namespace Tarp
 {
+    /*
+     * see: https://conservancy.umn.edu/bitstream/handle/11299/217382/monitorAlgorithm_0.pdf?sequence=1
+     */
     public class McDcFunctions
     {
         public int MarkAst(McDcNode node, int pos)
         {
-            if (node.SyntaxNode is ParenthesizedExpressionSyntax p && node.Kind == McDcNodeKind.Decision)
+            Debug.Assert(node != null);
+
+            if (node.SyntaxNode is BinaryExpressionSyntax b && (b.IsKind(SyntaxKind.LogicalAndExpression) || b.IsKind(SyntaxKind.LogicalOrExpression)))
             {
-                return MarkAst(node.Children[0], pos);
-            }
-            else if (node.SyntaxNode is BinaryExpressionSyntax b && (b.IsKind(SyntaxKind.LogicalAndExpression) || b.IsKind(SyntaxKind.LogicalOrExpression)))
-            {
+                Debug.Assert(node.Children != null && node.Children.Count == 2);
+
                 var maxL = MarkAst(node.Children[0], pos);
                 var maxR = MarkAst(node.Children[1], maxL);
 
@@ -28,25 +30,21 @@ namespace Tarp
             }
             else if (node.SyntaxNode is PrefixUnaryExpressionSyntax u && u.IsKind(SyntaxKind.LogicalNotExpression))
             {
+                Debug.Assert(node.Children != null && node.Children.Count == 1);
+
                 return MarkAst(node.Children[0], pos);
             }
             else
             {
+                Debug.Assert(node.Children == null);
+
                 // this gives a left-to-right ordering of conditions (leafs) in the tree
                 node.Position = pos;
                 return pos + 1;
             }
         }
 
-        public enum SideOfParent { Left, Right, Unary };
-        public class PathElem
-        {
-            public McDcNode Expr { get; set; }
-            public SideOfParent Side { get; set; }
-            public PathElem? Up { get; set; }
-        }
-
-        public bool? OpVal(PathElem n, bool? v)
+        public static bool? OpVal(PathElem n, bool? v)
         {
             Debug.Assert(n != null);
 
@@ -64,24 +62,22 @@ namespace Tarp
             return null;
         }
 
-        int AddToMask(int mask, int l, int r)
+        static int AddToMask(int mask, int l, int r)
         {
             //Debug.Assert(l >= 0 && l < 32);
             //Debug.Assert(r >= 0 && r < 32);
             //Debug.Assert(l <= r);
-            //var range = (((1 << (l - 1)) - 1) ^  ((1 << (r)) - 1));
+
             var min = 1 << (2 * l);
             var min2 = 1 << (2 * l + 1);
-            var range = (((1 << (min - 1)) - 1) ^ ((1 << (min2)) - 1));
 
             var max = 1 << (2 * r);
             var max2 = 1 << (2 * r + 1);
-            var range2 = (((1 << (max - 1)) - 1) ^ ((1 << (max2)) - 1));
 
             return mask | min | min2 | max | max2;
         }
 
-        public int SetMask(PathElem? path, int mask, bool? v)
+        public static int SetMask(PathElem? path, int mask, bool? v)
         {
             if (path == null || v == null)
             {
@@ -103,12 +99,16 @@ namespace Tarp
             }
         }
 
-        public bool DecisionComplete(PathElem? path, bool? v)
+        public static bool DecisionComplete(PathElem? path, bool? v)
         {
             if (v == null)
+            {
                 return false;
+            }
             else if (path == null)
+            {
                 return true;
+            }
             else
             {
                 v = OpVal(path, v);
@@ -116,19 +116,7 @@ namespace Tarp
             }
         }
 
-        public class MarkerFunction
-        {
-            public McDcNode Node { get; set; }
-            public PathElem Path { get; set; }
-            public int TrueBit { get; set; }
-            public int TrueMask { get; set; }
-            public bool TrueDone { get; set; }
-            public int FalseBit { get; set; }
-            public int FalseMask { get; set; }
-            public bool FalseDone { get; set; }
-        }
-
-        public MarkerFunction GenMarker(McDcNode node, PathElem path)
+        public static MarkerFunction GenMarker(McDcNode node, PathElem? path)
         {
             Debug.Assert(node != null);
             Debug.Assert(node.Kind == McDcNodeKind.Condition);
@@ -178,10 +166,14 @@ namespace Tarp
             return result;
         }
 
-        public void GenMarkers(McDcNode node, PathElem? path, List<MarkerFunction> functions)
+        private void GenMarkers(McDcNode node, PathElem? path, List<MarkerFunction> functions)
         {
+            Debug.Assert(node != null);
+
             if (node.SyntaxNode is BinaryExpressionSyntax a && (a.IsKind(SyntaxKind.LogicalAndExpression) || a.IsKind(SyntaxKind.LogicalOrExpression)))
             {
+                Debug.Assert(node.Children != null && node.Children.Count == 2);
+
                 var left = new PathElem { Expr = node, Side = SideOfParent.Left, Up = path };
                 var right = new PathElem { Expr = node, Side = SideOfParent.Right, Up = path };
                 GenMarkers(node.Children[0], left, functions);
@@ -189,17 +181,21 @@ namespace Tarp
             }
             else if (node.SyntaxNode  is PrefixUnaryExpressionSyntax u && u.IsKind(SyntaxKind.LogicalNotExpression))
             {
+                Debug.Assert(node.Children != null && node.Children.Count == 1);
+
                 var child = new PathElem { Expr = node, Side = SideOfParent.Unary, Up = path };
                 GenMarkers(node.Children[0], child, functions);
             }
             else
             {
+                Debug.Assert(node.Children == null);
+
                 var f = GenMarker(node, path);
                 functions.Add(f);
             }
         }
 
-        public List<MarkerFunction> CreateMarkers(McDcNode node)
+        public IReadOnlyList<MarkerFunction> CreateMarkers(McDcNode node)
         {
             var numPositions = MarkAst(node, 0);
 

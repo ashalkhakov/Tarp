@@ -2,6 +2,7 @@
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using System.Collections.Generic;
+using System.Diagnostics;
 using Tarp.Types;
 
 /*
@@ -37,18 +38,12 @@ public class McDcVisitor : CSharpSyntaxVisitor
         _stack = new();
         _roots = new();
     }
-    private SemanticModel _semanticModel;
-    private Stack<McDcNode> _stack;
-    private List<McDcNode> _roots;
+    private readonly SemanticModel _semanticModel;
+    private readonly Stack<McDcNode> _stack;
+    private readonly List<McDcNode> _roots;
 
-    public List<McDcNode> GetRoots()
-    {
-        return _roots;
-    }
-    public Stack<McDcNode> GetStack()
-    {
-        return _stack;
-    }
+    public IReadOnlyList<McDcNode> Roots => _roots;
+    public Stack<McDcNode> Stack => _stack;
 
     private bool IsBooleanExpression(CSharpSyntaxNode node)
     {
@@ -62,6 +57,8 @@ public class McDcVisitor : CSharpSyntaxVisitor
 
     public override void DefaultVisit(SyntaxNode node)
     {
+        Debug.Assert(node != null);
+
         var heightBefore = _stack.Count;
         foreach (var c in node.ChildNodes())
         {

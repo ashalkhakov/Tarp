@@ -55,9 +55,10 @@ namespace Tarp.Tests
         {
             var visitor = RunVisitorOnFile("../../../TestSources/SimpleDecisions.cs");
 
-            visitor.GetStack().Should().BeEmpty();
+            visitor.
+            Stack.Should().BeEmpty();
 
-            var roots = visitor.GetRoots();
+            var roots = visitor.Roots;
 
             throw new NotImplementedException();
         }
@@ -67,9 +68,10 @@ namespace Tarp.Tests
         {
             var visitor = RunVisitorOnFile("../../../TestSources/NestedConditionals.cs");
 
-            visitor.GetStack().Should().BeEmpty();
+            visitor.
+            Stack.Should().BeEmpty();
 
-            var roots = visitor.GetRoots();
+            var roots = visitor.Roots;
             roots.Should().HaveCount(2);
 
             McDcTreeOfNode(roots[0]).Should().BeEquivalentTo(
@@ -101,9 +103,10 @@ namespace Tarp.Tests
         {
             var visitor = RunVisitorOnFile("../../../TestSources/MaskedConditions.cs");
 
-            visitor.GetStack().Should().BeEmpty();
+            visitor.
+            Stack.Should().BeEmpty();
 
-            var roots = visitor.GetRoots();
+            var roots = visitor.Roots;
             roots.Should().HaveCount(1);
 
             McDcTreeOfNode(roots[0]).Should().BeEquivalentTo(
@@ -137,8 +140,10 @@ namespace Tarp.Tests
             }
         }
 
-        void CheckMarkerFunction(McDcFunctions.MarkerFunction f, int falseBit, bool falseDone, int falseMask, int trueBit, bool trueDone, int trueMask, string node, PathElement path)
+        void CheckMarkerFunction(MarkerFunction f, int falseBit, bool falseDone, int falseMask, int trueBit, bool trueDone, int trueMask, string node, PathElement path)
         {
+            Debug.Assert(f != null);
+
             f.FalseBit.Should().Be(falseBit);
             f.FalseDone.Should().Be(falseDone);
             f.FalseMask.Should().Be(falseMask);
@@ -149,14 +154,22 @@ namespace Tarp.Tests
             PathElementOfElem(f.Path).Should().BeEquivalentTo(path);
         }
 
+
+        // TODO: test with https://tsapps.nist.gov/publication/get_pdf.cfm?pub_id=923681
+        // TODO: is this useful? https://github.com/Armin-Montigny/MCDC
+        // TODO: is this useful? https://www.isp.uni-luebeck.de/sites/default/files/McdcThesisDinoLange.pdf see Iterative MC/DC Evaluation (python code)
+        // TODO: test with https://docs.google.com/document/d/1kG_Tm0caXzegua_ScRCSEq8wVb49mXPi/edit
+        // TODO: THE source of truth https://www.tc.faa.gov/its/worldpac/techrpt/ar01-18.pdf
+        // TODO what are the bitmap coverage objects? I think we need something similar https://llvm.org/devmtg/2022-11/slides/TechTalk4-MCDC-EnablingSafetyCriticalCodeCoverage.pdf
         [TestMethod]
         public void MarkingFunctionsTest()
         {
             var visitor = RunVisitorOnFile("../../../TestSources/MarkingFunctions.cs");
 
-            visitor.GetStack().Should().BeEmpty();
+            visitor.
+            Stack.Should().BeEmpty();
             
-            var roots = visitor.GetRoots();
+            var roots = visitor.Roots;
 
             var functions = new McDcFunctions();
             var markerFunctions = functions.CreateMarkers(roots[0]);
@@ -192,7 +205,7 @@ namespace Tarp.Tests
                 ));
         }
 
-        private PathElement PathElementOfElem(PathElem? p)
+        private PathElement? PathElementOfElem(PathElem? p)
         {
             if (p == null)
             {
@@ -202,6 +215,6 @@ namespace Tarp.Tests
             return x;
         }
 
-        public record PathElement(string Expr, SideOfParent side, PathElement? Up);
+        public record PathElement(string Expr, SideOfParent Side, PathElement? Up);
     }
 }

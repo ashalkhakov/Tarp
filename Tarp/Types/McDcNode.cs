@@ -30,7 +30,7 @@ namespace Tarp.Types
     {
         public McDcNodeKind Kind { get; set; }
         public CSharpSyntaxNode SyntaxNode { get; set; }
-        public List<McDcNode> Children { get; set; }
+        public List<McDcNode>? Children { get; set; }
 
         // only if Kind=Condition
         public int Position { get; set; }
