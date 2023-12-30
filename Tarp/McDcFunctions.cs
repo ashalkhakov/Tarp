@@ -151,17 +151,7 @@ namespace Tarp
              *   }
              * }
              */
-            var result = new MarkerFunction
-            {
-                Node = node,
-                TrueBit = trueBit,
-                TrueMask = trueMask,
-                TrueDone = trueDone,
-                FalseBit = falseBit,
-                FalseMask = falseMask,
-                FalseDone = falseDone,
-                Path = path
-            };
+            var result = new MarkerFunction(node, path, trueBit, trueMask, trueDone, falseBit, falseMask, falseDone);
             
             return result;
         }
@@ -174,8 +164,8 @@ namespace Tarp
             {
                 Debug.Assert(node.Children != null && node.Children.Count == 2);
 
-                var left = new PathElem { Expr = node, Side = SideOfParent.Left, Up = path };
-                var right = new PathElem { Expr = node, Side = SideOfParent.Right, Up = path };
+                var left = new PathElem(node, SideOfParent.Left, path);
+                var right = new PathElem(node, SideOfParent.Right, path);
                 GenMarkers(node.Children[0], left, functions);
                 GenMarkers(node.Children[1], right, functions);
             }
@@ -183,7 +173,7 @@ namespace Tarp
             {
                 Debug.Assert(node.Children != null && node.Children.Count == 1);
 
-                var child = new PathElem { Expr = node, Side = SideOfParent.Unary, Up = path };
+                var child = new PathElem(node, SideOfParent.Unary, path);
                 GenMarkers(node.Children[0], child, functions);
             }
             else
