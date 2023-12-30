@@ -50,7 +50,6 @@ namespace Tarp.Tests
         }
 
         [TestMethod]
-        [Ignore("Not implemented yet")]
         public void SimpleDecisions()
         {
             var visitor = RunVisitorOnFile("../../../TestSources/SimpleDecisions.cs");
@@ -59,8 +58,27 @@ namespace Tarp.Tests
             Stack.Should().BeEmpty();
 
             var roots = visitor.Roots;
+            roots.Should().HaveCount(2);
 
-            throw new NotImplementedException();
+            McDcTreeOfNode(roots[0]).Should().BeEquivalentTo(
+                new McDcDec("(A && B) || C", new()
+                {
+                    new McDcDec("A && B", new()
+                    {
+                        new McDcCond("A"),
+                        new McDcCond("B")
+                    }),
+                    new McDcCond("C")
+                }));
+            McDcTreeOfNode(roots[1]).Should().BeEquivalentTo(
+                new McDcDec("A && !B", new()
+                {
+                    new McDcCond("A"),
+                    new McDcDec("!B", new()
+                    {
+                        new McDcCond("B")
+                    })
+                }));
         }
 
         [TestMethod()]
@@ -103,8 +121,7 @@ namespace Tarp.Tests
         {
             var visitor = RunVisitorOnFile("../../../TestSources/MaskedConditions.cs");
 
-            visitor.
-            Stack.Should().BeEmpty();
+            visitor.Stack.Should().BeEmpty();
 
             var roots = visitor.Roots;
             roots.Should().HaveCount(1);
@@ -115,6 +132,78 @@ namespace Tarp.Tests
                     new McDcDec("A || B", new() { new McDcCond("A"), new McDcCond("B") }),
                     new McDcDec("C || D", new() { new McDcCond("C"), new McDcCond("D") })
                 }));
+        }
+
+        [TestMethod]
+        public void AllBooleanExpressions()
+        {
+            var visitor = RunVisitorOnFile("../../../TestSources/AllBooleanExpressions.cs");
+
+            visitor.Stack.Should().BeEmpty();
+
+            var roots = visitor.Roots;
+            roots.Should().HaveCount(9);
+
+            var rootNodes = roots.Select(r => McDcTreeOfNode(r)).ToList();
+
+            rootNodes[0].Should().BeEquivalentTo(
+                new McDcDec("b || c", new()
+                {
+                    new McDcCond("b"),
+                    new McDcCond("c")
+                })
+            );
+            rootNodes[1].Should().BeEquivalentTo(
+                new McDcDec("d || e || f", new()
+                {
+                    new McDcDec("d || e", new()
+                    {
+                        new McDcCond("d"),
+                        new McDcCond("e")
+                    }),
+                    new McDcCond("f")
+                })
+            );
+            rootNodes[2].Should().BeEquivalentTo(
+                new McDcDec("a == 100", new()
+                {
+                    new McDcCond("a == 100")
+                })
+            );
+
+            rootNodes[3].Should().BeEquivalentTo(
+                new McDcDec("a == 100", new()
+                {
+                    new McDcCond("a == 100")
+                })
+            );
+            rootNodes[4].Should().BeEquivalentTo(
+                new McDcDec("b || c", new()
+                {
+                    new McDcCond("b"),
+                    new McDcCond("c")
+                })
+            );
+            rootNodes[5].Should().BeEquivalentTo(
+                new McDcDec("d || e || f", new()
+                {
+                    new McDcDec("d || e", new()
+                    {
+                        new McDcCond("d"),
+                        new McDcCond("e")
+                    }),
+                    new McDcCond("f")
+                })
+            );
+            rootNodes[6].Should().BeEquivalentTo(
+                new McDcDec("b_or_c", new() { new McDcCond("b_or_c") })
+            );
+            rootNodes[7].Should().BeEquivalentTo(
+                new McDcDec("d_or_e_or_f", new() { new McDcCond("d_or_e_or_f") })
+            );
+            rootNodes[8].Should().BeEquivalentTo(
+                new McDcDec("a_is_equal_to_100", new() { new McDcCond("a_is_equal_to_100") })
+            );
         }
 
         public abstract record McDcTree();

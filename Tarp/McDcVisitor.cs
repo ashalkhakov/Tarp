@@ -73,13 +73,28 @@ public class McDcVisitor : CSharpSyntaxVisitor
             {
                 // shouldn't we create decisions here? a decision may just be a condition though?
                 var c = _stack.Pop();
-                var d = new McDcNode
+                if (c.Kind == McDcNodeKind.Condition)
                 {
-                    SyntaxNode = c.SyntaxNode,
-                    Kind = McDcNodeKind.Decision,
-                    Children = c.Children
-                };
-                _roots.Add(d);
+                    // condition: put it inside a decision
+                    var d = new McDcNode
+                    {
+                        SyntaxNode = c.SyntaxNode,
+                        Kind = McDcNodeKind.Decision,
+                        Children = new List<McDcNode> { c }
+                    };
+                    _roots.Add(d);
+                }
+                else
+                {
+                    // decision: embed it directly
+                    var d = new McDcNode
+                    {
+                        SyntaxNode = c.SyntaxNode,
+                        Kind = McDcNodeKind.Decision,
+                        Children = c.Children
+                    };
+                    _roots.Add(d);
+                }
             }
             return;
         }

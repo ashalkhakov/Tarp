@@ -104,36 +104,6 @@ namespace Tarp
             }
         }
 
-        public static int function_a(int a, bool b, bool c, bool d, bool e, bool f)
-        {
-            if (a == 100)
-            {
-                if (b || c)
-                    return 1;
-
-                if (d || e || f)
-                    return 2;
-            }
-            return 0;
-        }
-        
-        public static int function_b(int a, bool b, bool c, bool d, bool e, bool f)
-        {
-            bool a_is_equal_to_100 = a == 100;
-            bool b_or_c = b || c;
-            bool d_or_e_or_f = d || e || f;
-
-            if (a_is_equal_to_100)
-            {
-                if (b_or_c)
-                    return 1;
-
-                if (d_or_e_or_f)
-                    return 2;
-            }
-            return 0;
-        }
-
         private static bool Foo1 = 5 % 2 != 0;
 
         public static IEnumerable<int> NestedBinder1(int x)
