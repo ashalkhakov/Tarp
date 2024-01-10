@@ -268,7 +268,7 @@ namespace Tarp.Types
 
             writer.Write("digraph G\n{\n");
 
-            if (_blocks.Any(b => b.First is CfgBlockExit))
+            if (_blocks.Any(b => b.Last is CfgBlockExit))
             {
                 EmitBaseNode(writer, "exit");
             }
