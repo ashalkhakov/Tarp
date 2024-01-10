@@ -15,7 +15,7 @@ namespace TARPGEN
             0
         };
 
-        public static void Incr(int loc)
+        public static void Inc(int loc)
         {
             _counters[loc]++;
         }

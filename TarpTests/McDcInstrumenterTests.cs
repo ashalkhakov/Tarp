@@ -3,6 +3,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.FlowAnalysis;
+using Tarp.Types;
 
 namespace Tarp.Tests;
 
@@ -40,8 +41,9 @@ public class McDcInstrumenterTests
 
         var sourceTree = test.SyntaxTrees.Single();
         var model = test.GetSemanticModel(sourceTree);
-
+        /*
         var instrumenter = new McDcInstrumenter();
+        
         var newRoot = instrumenter.Visit(sourceTree.GetRoot());
 
         if (newRoot != sourceTree.GetRoot())
@@ -51,13 +53,23 @@ public class McDcInstrumenterTests
 
             Console.WriteLine(printed);
         }
+        */
+        var methods = sourceTree.GetRoot().DescendantNodes().OfType<MethodDeclarationSyntax>();
+        foreach (var method in methods)
+        {
+            //var methodCfg = ControlFlowGraph.Create(method, model);
+            //instrumenter.Instrument(methodCfg);
 
-        //var methods = sourceTree.GetRoot().DescendantNodes().OfType<MethodDeclarationSyntax>();
-        //foreach (var method in methods)
-        //{
-        //var methodCfg = ControlFlowGraph.Create(method, model);
-        //instrumenter.Instrument(methodCfg);
+            //var methodCfg = Cfg.Build(method);
 
-        //}
+            //var foo = new CfgBuildingVisitor2();
+            //foo.Visit(method);
+            //var dot = foo.EmitCFG();
+
+            var bar = new CfgBuildingVisitor3(method);
+            bar.Visit(method);
+
+            var dot = bar.GraphBuilder.EmitCFG();
+        }
     }
 }
