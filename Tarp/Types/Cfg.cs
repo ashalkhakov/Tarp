@@ -1,6 +1,7 @@
 ﻿using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Operations;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -205,9 +206,9 @@ namespace Tarp.Types
     {
     }
     public record CfgBlockExit() : CfgBlockLast;
-    public record CfgBlockBranch(int Label) : CfgBlockLast;
+    public record CfgBlockBranch(SyntaxNode? Instruction, int Label) : CfgBlockLast;
     public record CfgBlockConditionalBranch(SyntaxNode Cond, int LabelIfSo, int LabelIfNot) : CfgBlockLast;
-    public record CfgBlockReturn() : CfgBlockLast;
+    public record CfgBlockReturn(SyntaxNode? Expression) : CfgBlockLast;
 
     public class CfgBasicBlock
     {
@@ -231,8 +232,8 @@ namespace Tarp.Types
     /// </summary>
     /// <remarks
     /// A block is represented by
-    /// - its sequence of instructions in the middle
     /// - its incoming arcs (either an Entry point or a Label)
+    /// - its sequence of instructions in the middle (where no control flow branching is present)
     /// - its outgoing arcs (either an Exit point, a Conditional Branch, an Unconditional Branch, or a Return)
     /// 
     /// Since blocks don't have identity we can easily splice the subgraphs.
@@ -268,11 +269,7 @@ namespace Tarp.Types
 
             writer.Write("digraph G\n{\n");
 
-            if (_blocks.Any(b => b.Last is CfgBlockExit))
-            {
-                EmitBaseNode(writer, "exit");
-            }
-            EmitBaseNode(writer, "return");
+            EmitBaseNode(writer, "exit");
 
             var id = 0;
             foreach (var n in _blocks)
@@ -319,9 +316,10 @@ namespace Tarp.Types
                     writer.Write($"      {name} -> lab{cbr.LabelIfSo} [label = \"{cbr.Cond}\"];\n");
                     writer.Write($"      {name} -> lab{cbr.LabelIfNot} [label = \"!({cbr.Cond})\"];\n");
                 }
-                else if (n.Last is CfgBlockReturn)
+                else if (n.Last is CfgBlockReturn ret)
                 {
-                    writer.Write($"      {name} -> return;\n");
+                    // NOTE: a return block goes to the exit also
+                    writer.Write($"      {name} -> exit [label = \"{ret.Expression}\"];\n");
                 }
             }
             writer.Write("}\n");
@@ -338,13 +336,23 @@ namespace Tarp.Types
             _focus.Middle = middle;
         }
 
-        public void Label(int label)
+        /// <summary>
+        /// E I1 . I2 X ==> E I1 . goto L ; L: I1 X
+        /// where
+        /// E is entry(either Entry or L:)
+        /// X is exit(either Exit, goto L or Return E)
+        /// I is instruction(s)
+        /// . is the focus point
+        /// </summary>
+        /// <param name="label"></param>
+        /// <param name="token"></param>
+        public void Label(int label, SyntaxToken token)
         {
             Debug.Assert(_focus != null);
 
             var last = _focus.Last;
 
-            _focus.Last = new CfgBlockBranch(label);
+            _focus.Last = new CfgBlockBranch(null, label);
 
             var middle = _focus.Middle;
             DoublyLinkedList.Split(ref middle, out var tail);
@@ -362,12 +370,41 @@ namespace Tarp.Types
             _blocks.Add(block);
         }
 
-        public void Branch()
+        public void Branch(SyntaxNode instruction, int label)
         {
-            // FIXME: is this like "brfalse" instruction???
+            // FIXME: same as [Label]. remove?
+
+            Debug.Assert(_focus != null);
+
+            var last = _focus.Last;
+
+            _focus.Last = new CfgBlockBranch(instruction, label);
+
+            var middle = _focus.Middle;
+            DoublyLinkedList.Split(ref middle, out var tail);
+            _focus.Middle = middle;
+
+            var nextBlock = new CfgBasicBlock(new CfgBlockLabel(label), last);
+            nextBlock.Middle = tail;
+
+            Unfocus();
+            _focus = nextBlock;
         }
-        
-        public void CondBranch(SyntaxNode condition, int ifsoLabel, int ifNotLabel, int done)
+
+        /// <summary>
+        /// CondBranch(C, L1, L2, L3):
+        ///   E I1 . I2 X ==> E I1 Cond(C,L1,L2) ; L3: I2 X
+        /// where
+        /// E is entry(either Entry or L:)
+        /// X is exit(either Exit, goto L or Return E)
+        /// I is instruction(s)
+        /// . is the focus point
+        /// </summary>
+        /// <param name="condition"></param>
+        /// <param name="ifsoLabel"></param>
+        /// <param name="ifNotLabel"></param>
+        /// <param name="done"></param>
+        public void CondBranch(SyntaxNode condition, int ifsoLabel, int ifNotLabel, int? done)
         {
             Debug.Assert(_focus != null);
 
@@ -389,11 +426,20 @@ namespace Tarp.Types
             DoublyLinkedList.Split(ref middle, out var tail);
             _focus.Middle = middle;
 
-            var nextBlock = new CfgBasicBlock(new CfgBlockLabel(done), last);
-            nextBlock.Middle = tail;
+            if (done != null)
+            {
+                var nextBlock = new CfgBasicBlock(new CfgBlockLabel(done.Value), last);
+                nextBlock.Middle = tail;
 
-            Unfocus();
-            _focus = nextBlock;
+                Unfocus();
+                _focus = nextBlock;
+            }
+            else
+            {
+                Debug.Assert(tail == null);
+                Unfocus();
+                _focus = null;
+            }
         }
 
         public void Return(ExpressionSyntax? expression)
@@ -402,7 +448,7 @@ namespace Tarp.Types
 
             var last = _focus.Last; // TODO: what should we do with this one?
 
-            _focus.Last = new CfgBlockReturn();
+            _focus.Last = new CfgBlockReturn(expression);
         }
 
         public void Zip()
@@ -436,7 +482,36 @@ namespace Tarp.Types
                 }
                 if (n.Last is CfgBlockExit)
                 {
-                    n.Last = new CfgBlockBranch(labelExit);
+                    n.Last = new CfgBlockBranch(null, labelExit);
+                }
+                _blocks.Add(n);
+            }
+        }
+
+        public void Splice2(int labelEntry, int labelExit, CfgGraphBuilder g)
+        {
+            Debug.Assert(g._focus == null);
+            Debug.Assert(_focus != null);
+
+            if (_focus.First is CfgBlockLabel l && l.Label == labelEntry)
+            {
+                // labelEntry: I1 . I2 X
+                // g = Entry I Exit
+                // -->
+                // labelExit: I1 . I2 X
+                // g = LabelEntry: I goto LabelExit
+                _focus.First = new CfgBlockLabel(labelExit);
+            }
+
+            foreach (var n in g._blocks)
+            {
+                if (n.First is CfgBlockEntry)
+                {
+                    n.First = new CfgBlockLabel(labelEntry);
+                }
+                if (n.Last is CfgBlockExit)
+                {
+                    n.Last = new CfgBlockBranch(null, labelExit);
                 }
                 _blocks.Add(n);
             }
@@ -786,16 +861,20 @@ namespace Tarp.Types
         }
     }*/
 
+    public record CfgBuilderLoopInfo(int LoopStartLabel, int LoopEndLabel);
+
     public class CfgBuildingVisitor3 : CSharpSyntaxVisitor
     {
         public CfgBuildingVisitor3(MethodDeclarationSyntax method)
         {
             _graphBuilders = new Stack<CfgGraphBuilder>();
             _subgraphs = new();
+            _loopInfos = new();
         }
         readonly Stack<CfgGraphBuilder> _graphBuilders;
         readonly List<CfgGraphBuilder> _subgraphs;
         int _numLabels; // TODO: this must be per method, right?
+        readonly Stack<CfgBuilderLoopInfo> _loopInfos; // TODO: this must be per method, right?
 
         public CfgGraphBuilder GraphBuilder => _subgraphs.Last();
 
@@ -806,33 +885,67 @@ namespace Tarp.Types
             _graphBuilders.Peek().Instruction(node);
         }
 
+        public override void VisitAssignmentExpression(AssignmentExpressionSyntax node)
+        {
+            Debug.Assert(_graphBuilders.Count > 0);
+
+            _graphBuilders.Peek().Instruction(node);
+        }
+
+        public override void VisitPostfixUnaryExpression(PostfixUnaryExpressionSyntax node)
+        {
+            Debug.Assert(_graphBuilders.Count > 0);
+
+            _graphBuilders.Peek().Instruction(node);
+        }
+
         public override void VisitIfStatement(IfStatementSyntax node)
         {
             Debug.Assert(_graphBuilders.Count > 0);
 
-            // allocate new labels
-            var done = _numLabels++;
-            var ifso = _numLabels++;
-            var ifno = _numLabels++;
+            if (node.Else != null)
+            {
+                // allocate new labels
+                var done = _numLabels++;
+                var ifso = _numLabels++;
+                var ifno = _numLabels++;
 
-            // finish the current node
-            _graphBuilders.Peek().CondBranch(node.Condition, ifso, ifno, done);
+                // finish the current node
+                _graphBuilders.Peek().CondBranch(node.Condition, ifso, ifno, done);
 
-            // translate [then]
-            var so = new CfgGraphBuilder();
-            _graphBuilders.Push(so);
-            Visit(node.Statement);
-            _graphBuilders.Pop();
-            so.Unfocus();
-            _graphBuilders.Peek().Splice(ifso, done, so);
+                // translate [then]
+                var so = new CfgGraphBuilder();
+                _graphBuilders.Push(so);
+                Visit(node.Statement);
+                _graphBuilders.Pop();
+                so.Unfocus();
+                _graphBuilders.Peek().Splice(ifso, done, so);
 
-            // translate [else]
-            var no = new CfgGraphBuilder();
-            _graphBuilders.Push(no);
-            Visit(node.Else.Statement);
-            _graphBuilders.Pop();
-            no.Unfocus();
-            _graphBuilders.Peek().Splice(ifno, done, no);
+                // translate [else]
+                var no = new CfgGraphBuilder();
+                _graphBuilders.Push(no);
+                Visit(node.Else.Statement);
+                _graphBuilders.Pop();
+                no.Unfocus();
+                _graphBuilders.Peek().Splice(ifno, done, no);
+            }
+            else
+            {
+                // allocate new labels
+                var done = _numLabels++;
+                var ifso = _numLabels++;
+
+                // finish the current node
+                _graphBuilders.Peek().CondBranch(node.Condition, ifso, done, done);
+
+                // translate [then]
+                var so = new CfgGraphBuilder();
+                _graphBuilders.Push(so);
+                Visit(node.Statement);
+                _graphBuilders.Pop();
+                so.Unfocus();
+                _graphBuilders.Peek().Splice(ifso, done, so);
+            }
         }
 
         public override void VisitWhileStatement(WhileStatementSyntax node)
@@ -855,19 +968,122 @@ namespace Tarp.Types
             var loopBody = _numLabels++;
 
             // finish the current node
-            _graphBuilders.Peek().Label(loopStart);
+            _graphBuilders.Peek().Label(loopStart, node.WhileKeyword);
 
             _graphBuilders.Peek().CondBranch(node.Condition, loopBody, loopEnd, loopEnd);
 
             // translate the loop body
+            _loopInfos.Push(new CfgBuilderLoopInfo(loopStart, loopEnd));
             var body = new CfgGraphBuilder();
             _graphBuilders.Push(body);
             Visit(node.Statement);
             _graphBuilders.Pop();
+            _loopInfos.Pop();
             body.Unfocus();
-            //_graphBuilders.Peek().Label(loopEnd);
-            _graphBuilders.Peek().Splice(loopBody, loopStart, body);
+            _graphBuilders.Peek().Splice2(loopBody, loopStart, body);
         }
+
+        public override void VisitDoStatement(DoStatementSyntax node)
+        {
+            Debug.Assert(_graphBuilders.Count > 0);
+
+            /*
+             * Lbody:
+             * ...
+             * Lcond:
+             * if (P) goto Lbody;
+             * else goto Lend;
+             * Lend:
+             */
+            
+            // allocate new labels
+            var loopBody = _numLabels++;
+            var loopCond = _numLabels++;
+            var loopEnd = _numLabels++;
+
+            // finish the current node
+            _graphBuilders.Peek().Label(loopBody, node.DoKeyword);
+
+            // translate the loop body
+            _loopInfos.Push(new CfgBuilderLoopInfo(loopBody, loopEnd));
+            var body = new CfgGraphBuilder();
+            _graphBuilders.Push(body);
+            Visit(node.Statement);
+            _graphBuilders.Pop();
+            _loopInfos.Pop();
+            body.Unfocus();
+            _graphBuilders.Peek().Splice2(loopBody, loopCond, body);
+            _graphBuilders.Peek().CondBranch(node.Condition, loopBody, loopEnd, loopEnd);
+        }
+
+        public override void VisitForStatement(ForStatementSyntax node)
+        {
+            Debug.Assert(_graphBuilders.Count > 0);
+
+            /*
+             * Declaration;
+             * for (Initializers; Condition; Incrementors) { S }
+             * 
+             * ==>
+             * 
+             * Declaration;
+             * Initializers;
+             * Lstart:
+             * if Condition then Lbody else Lend;
+             * Lbody:
+             *  S; goto Lincr;
+             * Lincr:
+             *  Incrementors;
+             *  goto Lstart;
+             * Lend:
+             */
+
+            var Lstart = _numLabels++;
+            var Lbody = _numLabels++;
+            var Lincr = _numLabels++;
+            var Lend = _numLabels++;
+
+            Visit(node.Declaration);
+            foreach (var n in node.Initializers)
+            {
+                Visit(n);
+            }
+
+            // finish the current node
+            _graphBuilders.Peek().Label(Lstart, node.ForKeyword);
+
+            _graphBuilders.Peek().CondBranch(node.Condition, Lbody, Lend, Lend);
+
+            // translate the loop body
+            _loopInfos.Push(new CfgBuilderLoopInfo(Lbody, Lincr));
+            var body = new CfgGraphBuilder();
+            _graphBuilders.Push(body);
+            Visit(node.Statement);
+            _graphBuilders.Pop();
+            _loopInfos.Pop();
+            body.Unfocus();
+            _graphBuilders.Peek().Splice2(Lbody, Lincr, body);
+
+            // translate the incrementors block
+            var incr = new CfgGraphBuilder();
+            _graphBuilders.Push(incr);
+            foreach (var n in node.Incrementors)
+            {
+                Visit(n);
+            }
+            _graphBuilders.Pop();
+            incr.Unfocus();
+            _graphBuilders.Peek().Splice2(Lincr, Lstart, incr);
+        }
+
+        /*
+        public override void VisitForEachStatement(ForEachStatementSyntax node)
+        {
+            // TODO: how to handle this?
+            //   foreach (var x in E) S
+            // we are only interested in S. has it been entered and exited at least once?
+            base.VisitForEachStatement(node);
+        }*/
 
         public override void VisitBlock(BlockSyntax node)
         {
@@ -879,12 +1095,93 @@ namespace Tarp.Types
             }
         }
 
+        public override void VisitBreakStatement(BreakStatementSyntax node)
+        {
+            Debug.Assert(_loopInfos.Count > 0);
+            Debug.Assert(_graphBuilders.Count > 0);
+
+            var loopInfo = _loopInfos.Peek();
+
+            _graphBuilders.Peek().Branch(node, loopInfo.LoopEndLabel);
+        }
+
+        public override void VisitContinueStatement(ContinueStatementSyntax node)
+        {
+            Debug.Assert(_loopInfos.Count > 0);
+            Debug.Assert(_graphBuilders.Count > 0);
+
+            var loopInfo = _loopInfos.Peek();
+
+            _graphBuilders.Peek().Branch(node, loopInfo.LoopStartLabel);
+        }
+
+        public override void VisitSwitchStatement(SwitchStatementSyntax node)
+        {
+            Debug.Assert(_graphBuilders.Count > 0);
+
+            /*
+             * switch (E) {
+             * case C1:
+             * case C2:
+             * ...
+             * case Cn:
+             *  // E == C1 || E == C2 || ... || E == Cn
+             *  // entry into this block
+             *  // NOTE: but also! E is only evaluated ONCE!
+             *  // e.g. a temporary needs to be created. tmp = E; if (tmp == C1 || tmp == C2 || ... || tmp == Cn) S1 else if (tmp == Cm) ...
+             *  S1;
+             *  break;
+             * case Cm:
+             *  // E == Cm
+             *  // entry into this block
+             *  S2;
+             *  break;
+             * default:
+             *  // negation of all of the above predicates...
+             *  // entry into this block
+             *  break;
+             * }
+             * 
+             * TODO: make a separate primitive for jump tables? rewrite to if-then-else?
+             */
+            throw new NotImplementedException();
+
+            /*
+            // allocate new labels
+            var done = _numLabels++;
+            var ifso = _numLabels++;
+            var ifno = _numLabels++;
+
+            // finish the current node
+            _graphBuilders.Peek().CondBranch(node.Expression, ifso, ifno, done);
+
+            // translate [then]
+            var so = new CfgGraphBuilder();
+            _graphBuilders.Push(so);
+            Visit(node.Statement);
+            _graphBuilders.Pop();
+            so.Unfocus();
+            _graphBuilders.Peek().Splice(ifso, done, so);
+
+            // translate [else]
+            var no = new CfgGraphBuilder();
+            _graphBuilders.Push(no);
+            Visit(node.Else.Statement);
+            _graphBuilders.Pop();
+            no.Unfocus();
+            _graphBuilders.Peek().Splice(ifno, done, no);
+            */
+        }
+
+        // TODO: more statement kinds?
+        // TODO: what about declarations inside a method? delegates, lambdas, inner functions
+
         public override void VisitLabeledStatement(LabeledStatementSyntax node)
         {
             Debug.Assert(_graphBuilders.Count > 0);
 
             var l = _numLabels++; // TODO: save the exact labels too?
-            _graphBuilders.Peek().Label(l);
+            _graphBuilders.Peek().Label(l, node.Identifier);
             Visit(node.Statement);
         }
 
@@ -908,7 +1205,6 @@ namespace Tarp.Types
             else
             {
                 Visit(node.Body);
-                builder.Return(null);
             }
             builder.Unfocus();
 

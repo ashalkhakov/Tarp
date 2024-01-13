@@ -45,6 +45,14 @@ public class Instrument1
 
         return r;
     }
+    public int Method1_2(int a)
+    {
+        if (a > 0)
+        {
+            return 1;
+        }
+        return -1;
+    }
     public int Method2(int a)
     {
         int r = 1;
@@ -57,18 +65,41 @@ public class Instrument1
 
         return r;
     }
-    /*
-    public void Mehtod01(int a)
+
+    public void Method2_1(int a)
     {
         var i = 0;
-        while (i < a)
+        while (true)
         {
-            if (i % 2 == 0)
+            if (i > a)
                 break;
             i++;
         }
     }
-    
+
+    public int Method3(int c)
+    {
+        int r = 1;
+        do
+        {
+            r *= c;
+            c--;
+        }
+        while (c > 0);
+        return r;
+    }
+
+    public int Method4(int c)
+    {
+        int r;
+        for (r = 1; c > 0; c--)
+        {
+            r *= c;
+        }
+        return r;
+    }
+
+    /*
     public void Method1(int a, int b, int c, int x, int y, int z)
     {
         int max;
