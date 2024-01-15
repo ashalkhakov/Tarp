@@ -143,6 +143,25 @@ public class Instrument1
                 return 2;
         }
     }
+    public int Method5_0(int c)
+    {
+        int r;
+        switch (c)
+        {
+            case 0:
+                r = 1;
+                break;
+            case 1:
+            default:
+                r = 3;
+                break;
+            case 2:
+            case 3:
+                r = 2;
+                break;
+        }
+        return r;
+    }
 
     public int Method5_1(int c)
     {

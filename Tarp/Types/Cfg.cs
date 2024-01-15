@@ -1242,9 +1242,9 @@ namespace Tarp.Types
              */
 
             DefaultSwitchLabelSyntax? defaultLabel = null;
-            SyntaxList<StatementSyntax>? defaultStatements = null;
+            IEnumerable<StatementSyntax>? defaultStatements = null;
 
-            LinkedListNode<(ExpressionSyntax Cond, SyntaxList<StatementSyntax> Statements)>? clauses = null;
+            LinkedListNode<(ExpressionSyntax Cond, IEnumerable<StatementSyntax> Statements)>? clauses = null;
 
             foreach (var section in node.Sections)
             {
@@ -1257,7 +1257,7 @@ namespace Tarp.Types
                         if (defaultLabel != null)
                             throw new Exception("Multiple default labels in a switch");
                         defaultLabel = d;
-                        defaultStatements = section.Statements;
+                        defaultStatements = section.Statements.Where(s => !(s is BreakStatementSyntax));
                         continue;
                     }
 
@@ -1271,7 +1271,7 @@ namespace Tarp.Types
                     .Aggregate((e1, e2) => 
                         SyntaxFactory.BinaryExpression(SyntaxKind.LogicalOrExpression, e1, e2));
                 
-                var statements = section.Statements;
+                var statements = section.Statements.Where(s => !(s is BreakStatementSyntax));
 
                 DoublyLinkedList.InsertAfter(ref clauses, (expression, statements));
             }
