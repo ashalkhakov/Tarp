@@ -8,6 +8,7 @@ namespace TarpTests.TestSources;
 
 public class Instrument1
 {
+    /*
     public void Foo(int x)
     {
 
@@ -15,7 +16,7 @@ public class Instrument1
 
     public int Bar(int x) => x + 1;
     
-    
+    #region Label
     public int Method0(int a)
     {
         int r;
@@ -29,7 +30,9 @@ public class Instrument1
 
         return r;
     }
+    #endregion
     
+    #region If
     public int Method1(int a)
     {
         int r;
@@ -45,6 +48,24 @@ public class Instrument1
 
         return r;
     }
+    public int Method1_1(int a)
+    {
+        int r;
+
+        if (a > 0)
+        {
+            r = 1;
+        }
+        else if (a < 0)
+        {
+            r = -1;
+        }
+        else
+        {
+            r = 0;
+        }
+        return r;
+    }
     public int Method1_2(int a)
     {
         if (a > 0)
@@ -53,6 +74,11 @@ public class Instrument1
         }
         return -1;
     }
+    
+    #endregion
+    
+    #region While
+
     public int Method2(int a)
     {
         int r = 1;
@@ -88,7 +114,9 @@ public class Instrument1
         while (c > 0);
         return r;
     }
+    #endregion
 
+    #region For
     public int Method4(int c)
     {
         int r;
@@ -98,7 +126,36 @@ public class Instrument1
         }
         return r;
     }
+    #endregion
+    */
+    #region Switch
+    public int Method5(int c)
+    {
+        switch (c)
+        {
+            case 0:
+                return 1;
+            case 1:
+            default:
+                return 3;
+            case 2:
+            case 3:
+                return 2;
+        }
+    }
 
+    public int Method5_1(int c)
+    {
+        switch (c)
+        {
+            case 0:
+                return 1;
+            case 1:
+                return 2;
+        }
+        return 3;
+    }
+    #endregion
     /*
     public void Method1(int a, int b, int c, int x, int y, int z)
     {

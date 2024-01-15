@@ -181,8 +181,13 @@ namespace Tarp.Types
             }
         }
 
-        public static LinkedListNode<T>? Reverse<T>(LinkedListNode<T> list)
+        public static LinkedListNode<T>? Reverse<T>(LinkedListNode<T>? list)
         {
+            if (list == null)
+            {
+                return null;
+            }
+
             LinkedListNode<T>? prev = null;
             var current = list;
             LinkedListNode<T>? next;
@@ -462,6 +467,14 @@ namespace Tarp.Types
             _focus.Middle = middle;
         }
 
+        public void Unzip(CfgBasicBlock block)
+        {
+            Debug.Assert(block != null);
+            Debug.Assert(_focus == null);
+
+            _focus = block;
+        }
+
         public void Unfocus()
         {
             Debug.Assert(_focus != null);
@@ -614,6 +627,30 @@ namespace Tarp.Types
             // splice a single-entry, single-exit graph g
             // into the edge at the current focus.
             // the new focus is at the exit edge of the spliced-in graph.
+        }
+
+        public void GotoStart()
+        {
+            Debug.Assert(_focus != null);
+
+            var n = _focus.Middle;
+            while (n != null && n.Prev != null)
+            {
+                n = n.Prev;
+            }
+            _focus.Middle = n;
+        }
+
+        public void GotoEnd()
+        {
+            Debug.Assert(_focus != null);
+
+            var n = _focus.Middle;
+            while (n != null && n.Next != null)
+            {
+                n = n.Next;
+            }
+            _focus.Middle = n;
         }
     }
 
@@ -869,12 +906,15 @@ namespace Tarp.Types
         {
             _graphBuilders = new Stack<CfgGraphBuilder>();
             _subgraphs = new();
-            _loopInfos = new();
+            _continueLabels = new();
+            _breakLabels = new();
         }
         readonly Stack<CfgGraphBuilder> _graphBuilders;
         readonly List<CfgGraphBuilder> _subgraphs;
         int _numLabels; // TODO: this must be per method, right?
-        readonly Stack<CfgBuilderLoopInfo> _loopInfos; // TODO: this must be per method, right?
+        // TODO: this must be per method, right?
+        readonly Stack<int> _continueLabels;
+        readonly Stack<int> _breakLabels;
 
         public CfgGraphBuilder GraphBuilder => _subgraphs.Last();
 
@@ -897,6 +937,41 @@ namespace Tarp.Types
             Debug.Assert(_graphBuilders.Count > 0);
 
             _graphBuilders.Peek().Instruction(node);
+        }
+
+        private void TranslateIfStatement(ExpressionSyntax condition, SyntaxList<StatementSyntax> statements, int entry, int ifso, int ifno, int done)
+        {
+            // finish the current node
+
+            // translate [then]
+            var so = new CfgGraphBuilder();
+            _graphBuilders.Push(so);
+            _graphBuilders.Peek().CondBranch(condition, ifso, ifno, ifso);
+            {
+                foreach (var statement in statements)
+                {
+                    Visit(statement);
+                }
+            }
+            _graphBuilders.Pop();
+            so.Unfocus();
+            _graphBuilders.Peek().Splice2(entry, ifno, so);
+
+            // translate [else]
+            /*
+            var no = new CfgGraphBuilder();
+            _graphBuilders.Push(no);
+            Visit(node.Else.Statement);
+            _graphBuilders.Pop();
+            no.Unfocus();
+            _graphBuilders.Peek().Splice(ifno, done, no);
+            */
+
+            // what about the focus? it's currently at the DONE label
+            // we want to replace it somehow... just unfocus it.
+            
+
+            //_graphBuilders.Peek().Label(ifno, SyntaxFactory.Token(SyntaxKind.CaseKeyword));
         }
 
         public override void VisitIfStatement(IfStatementSyntax node)
@@ -973,12 +1048,14 @@ namespace Tarp.Types
             _graphBuilders.Peek().CondBranch(node.Condition, loopBody, loopEnd, loopEnd);
 
             // translate the loop body
-            _loopInfos.Push(new CfgBuilderLoopInfo(loopStart, loopEnd));
+            _continueLabels.Push(loopStart);
+            _breakLabels.Push(loopEnd);
             var body = new CfgGraphBuilder();
             _graphBuilders.Push(body);
             Visit(node.Statement);
             _graphBuilders.Pop();
-            _loopInfos.Pop();
+            _continueLabels.Pop();
+            _breakLabels.Pop();
             body.Unfocus();
             _graphBuilders.Peek().Splice2(loopBody, loopStart, body);
         }
@@ -1005,12 +1082,14 @@ namespace Tarp.Types
             _graphBuilders.Peek().Label(loopBody, node.DoKeyword);
 
             // translate the loop body
-            _loopInfos.Push(new CfgBuilderLoopInfo(loopBody, loopEnd));
+            _continueLabels.Push(loopBody);
+            _breakLabels.Push(loopEnd);
             var body = new CfgGraphBuilder();
             _graphBuilders.Push(body);
             Visit(node.Statement);
             _graphBuilders.Pop();
-            _loopInfos.Pop();
+            _continueLabels.Pop();
+            _breakLabels.Pop();
             body.Unfocus();
             _graphBuilders.Peek().Splice2(loopBody, loopCond, body);
             _graphBuilders.Peek().CondBranch(node.Condition, loopBody, loopEnd, loopEnd);
@@ -1055,12 +1134,14 @@ namespace Tarp.Types
             _graphBuilders.Peek().CondBranch(node.Condition, Lbody, Lend, Lend);
 
             // translate the loop body
-            _loopInfos.Push(new CfgBuilderLoopInfo(Lbody, Lincr));
+            _continueLabels.Push(Lbody);
+            _breakLabels.Push(Lend);
             var body = new CfgGraphBuilder();
             _graphBuilders.Push(body);
             Visit(node.Statement);
             _graphBuilders.Pop();
-            _loopInfos.Pop();
+            _continueLabels.Pop();
+            _breakLabels.Pop();
             body.Unfocus();
             _graphBuilders.Peek().Splice2(Lbody, Lincr, body);
 
@@ -1097,22 +1178,22 @@ namespace Tarp.Types
 
         public override void VisitBreakStatement(BreakStatementSyntax node)
         {
-            Debug.Assert(_loopInfos.Count > 0);
+            Debug.Assert(_breakLabels.Count > 0);
             Debug.Assert(_graphBuilders.Count > 0);
 
-            var loopInfo = _loopInfos.Peek();
+            var breakLabel = _breakLabels.Peek();
 
-            _graphBuilders.Peek().Branch(node, loopInfo.LoopEndLabel);
+            _graphBuilders.Peek().Branch(node, breakLabel);
         }
 
         public override void VisitContinueStatement(ContinueStatementSyntax node)
         {
-            Debug.Assert(_loopInfos.Count > 0);
+            Debug.Assert(_continueLabels.Count > 0);
             Debug.Assert(_graphBuilders.Count > 0);
 
-            var loopInfo = _loopInfos.Peek();
+            var continueLabel = _continueLabels.Peek();
 
-            _graphBuilders.Peek().Branch(node, loopInfo.LoopStartLabel);
+            _graphBuilders.Peek().Branch(node, continueLabel);
         }
 
         public override void VisitSwitchStatement(SwitchStatementSyntax node)
@@ -1141,36 +1222,83 @@ namespace Tarp.Types
              *  // entry into this block
              *  break;
              * }
+             *
+             * see also: http://www.ada-europe.org/conference2014/presentations/MCDC%20Case%20Statements.pdf
+             * they are handling it EXACTLY as expected. so, rewrite to consecutive if-then-else:
              * 
-             * TODO: make a separate primitive for jump tables? rewrite to if-then-else?
+             * if (E == C1 || E == C2 || ... || E == Cn) {S1;}
+             * else if (E == Cm) {S2;}
+             * else {}
+             * 
+             * also, don't care about multiple evaluations of E. the executable code will still be the same,
+             * we just want to mark it for ourselves when a specific condition has been evaluated.
+             * e.g. if we get into S1, then we know that tmp=E;tmp==C1||tmp==C2||tmp==C3 must have been evaluated.
+             * 
+             * OR, do care about multiple evaluations. then simply introduce fresh temporaries.
+             * OR, just disallow for E to be anything but a variable in the source program. make programmers rewrite it. probably the best solution.
+             * OR, let programmers know that if E contains side-effects, instrumentation WILL change the behavior of their programs. woops.
+             * 
+             * TODO: support default-less switch (in this case, instead of a default, you just go directly to [done]).
              */
-            throw new NotImplementedException();
 
-            /*
-            // allocate new labels
-            var done = _numLabels++;
-            var ifso = _numLabels++;
-            var ifno = _numLabels++;
+            DefaultSwitchLabelSyntax? defaultLabel = null;
+            SyntaxList<StatementSyntax>? defaultStatements = null;
 
-            // finish the current node
-            _graphBuilders.Peek().CondBranch(node.Expression, ifso, ifno, done);
+            LinkedListNode<(ExpressionSyntax Cond, SyntaxList<StatementSyntax> Statements)>? clauses = null;
 
-            // translate [then]
-            var so = new CfgGraphBuilder();
-            _graphBuilders.Push(so);
-            Visit(node.Statement);
-            _graphBuilders.Pop();
-            so.Unfocus();
-            _graphBuilders.Peek().Splice(ifso, done, so);
+            foreach (var section in node.Sections)
+            {
+                var operands = new List<ExpressionSyntax>();
 
-            // translate [else]
-            var no = new CfgGraphBuilder();
-            _graphBuilders.Push(no);
-            Visit(node.Else.Statement);
-            _graphBuilders.Pop();
-            no.Unfocus();
-            _graphBuilders.Peek().Splice(ifno, done, no);
-            */
+                foreach (var label in section.Labels)
+                {
+                    if (label is DefaultSwitchLabelSyntax d)
+                    {
+                        if (defaultLabel != null)
+                            throw new Exception("Multiple default labels in a switch");
+                        defaultLabel = d;
+                        defaultStatements = section.Statements;
+                        continue;
+                    }
+
+                    var labelExpr = (CaseSwitchLabelSyntax)label;
+                    operands.Add(labelExpr.Value);
+                }
+
+                var expression = operands
+                    .Select(e =>
+                        SyntaxFactory.BinaryExpression(SyntaxKind.EqualsExpression, node.Expression, e))
+                    .Aggregate((e1, e2) => 
+                        SyntaxFactory.BinaryExpression(SyntaxKind.LogicalOrExpression, e1, e2));
+                
+                var statements = section.Statements;
+
+                DoublyLinkedList.InsertAfter(ref clauses, (expression, statements));
+            }
+
+            // clauses -> branches
+            // - default is the last one
+
+            // rewind
+            StatementSyntax defBlock = SyntaxFactory.Block(defaultStatements);
+
+            while (clauses != null)
+            {
+                defBlock =
+                    SyntaxFactory.IfStatement(
+                    clauses.Value.Cond,
+                    SyntaxFactory.Block(clauses.Value.Statements),
+                    SyntaxFactory.ElseClause(defBlock))
+                    .WithLeadingTrivia(SyntaxFactory.Whitespace(" "));
+                if (clauses.Prev == null)
+                {
+                    break;
+                }
+                clauses = clauses.Prev;
+            }
+
+            // TODO: make a separate pass for [switch] rewrites?
+            Visit(defBlock);
         }
 
         // TODO: more statement kinds?
