@@ -66,7 +66,7 @@ public class McDcInstrumenterTests
             //foo.Visit(method);
             //var dot = foo.EmitCFG();
 
-            var bar = new CfgBuildingVisitor3(method);
+            var bar = new CfgBuildingVisitor(method);
             bar.Visit(method);
 
             var dot = bar.GraphBuilder.EmitCFG();
