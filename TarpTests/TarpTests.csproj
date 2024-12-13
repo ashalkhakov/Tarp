@@ -21,6 +21,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\TarpTestApp\TarpTestApp.csproj" />
     <ProjectReference Include="..\Tarp\Tarp.csproj" />
   </ItemGroup>
 

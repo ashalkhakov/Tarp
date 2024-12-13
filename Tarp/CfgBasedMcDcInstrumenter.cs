@@ -1,4 +1,5 @@
 ﻿using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Editing;
 using Microsoft.CodeAnalysis.Text;
@@ -16,7 +17,56 @@ namespace Tarp
     {
         public CfgBasedMcDcInstrumenter()
         {
+            _numCounters = 0;
+            _counters = new();
+            _counterIncreaseMethodName = SyntaxFactory.IdentifierName("TARPGEN.C.Inc"); // TODO: ensure it's fresh
+        }
 
+        private int _numCounters;
+        private List<CounterInformation> _counters;
+        readonly IdentifierNameSyntax _counterIncreaseMethodName;
+
+        enum CounterKind : int
+        {
+            MethodEntry = 0,
+            MethodExit = 1,
+            Line = 2,
+            Branch = 3
+        }
+
+        class CounterInformation
+        {
+            public int Id { get; set; }
+            public CounterKind Kind { get; set; }
+            public int CfgBlockId { get; set; }
+            public TextSpan SourceSpan { get; set; }
+            public MethodDeclarationSyntax? Method { get; set; } // only for entry/exit counters
+        }
+
+        private ExpressionStatementSyntax IncrementCounter(CounterInformation c)
+        {
+            var id = SyntaxFactory.Literal(c.Id);
+
+            var expr0 = SyntaxFactory.InvocationExpression(
+                _counterIncreaseMethodName,
+                SyntaxFactory.ArgumentList(
+                    SyntaxFactory.SeparatedList(
+                        new[] {
+                        // NOTE: remove this. it's here to show what location this counter maps to.
+                        SyntaxFactory.Argument(
+                            SyntaxFactory.LiteralExpression(SyntaxKind.StringLiteralExpression, SyntaxFactory.Literal(c.SourceLocation.ToString()))
+                        ),
+
+                        SyntaxFactory.Argument(
+                            SyntaxFactory.LiteralExpression(SyntaxKind.NumericLiteralExpression, id)
+                        )
+                        }
+                    )
+                )
+            );
+            var expr = SyntaxFactory.ExpressionStatement(expr0);
+
+            return expr;
         }
 
         public async Task Instrument(MethodDeclarationSyntax method, DocumentEditor editor)
@@ -25,14 +75,10 @@ namespace Tarp
             builder.Visit(method);
             var cfg = builder.GraphBuilder;
 
-            Dictionary<CfgBasicBlock, TextSpan> dict = new();
+            Dictionary<int, TextSpan> dict = new();
             foreach (var block in cfg.Blocks)
             {
                 var beg = block.First;
-                if (beg is CfgBlockEntry)
-                {
-                    // it's a method entry. put a probe BEFORE the first node in the middle.
-                }
 
                 // find the extent of the block
                 // - it's the largest extent of the code contained by the block
@@ -40,6 +86,8 @@ namespace Tarp
                 var instr = block.Middle;
                 var spanStart = -1;
                 var spanEnd = 0;
+                SyntaxNode? firstExpression = instr?.Value;
+                SyntaxNode? lastExpression = instr?.Value;
                 while (instr != null)
                 {
                     if (spanStart == -1)
@@ -51,27 +99,63 @@ namespace Tarp
                     {
                         spanEnd = instr.Value.Span.End;
                     }
+                    if (instr.Next == null)
+                    {
+                        lastExpression = instr.Value;
+                    }
                     instr = instr.Next;
+                }
+
+                // it's a method entry. put a probe BEFORE the first node in the middle.
+                if (beg is CfgBlockEntry)
+                {
+                    var entryCounter = new CounterInformation
+                    {
+                        CfgBlockId = block.Id,
+                        SourceSpan = firstExpression.Span,
+
+                        Kind = CounterKind.MethodEntry,
+                        Id = _numCounters++,
+                        Method = method
+                    };
+                    _counters.Add(entryCounter);
+                    editor.InsertBefore(firstExpression, IncrementCounter(entryCounter));
                 }
 
                 var end = block.Last;
                 if (end is CfgBlockExit)
                 {
-                    
+
                 }
                 else if (end is CfgBlockReturn r)
                 {
                     Debug.Assert(r.Expression != null);
+                    lastExpression = r.Expression;
                     spanEnd = r.Expression.Span.End;
+
+                    var exitCounter = new CounterInformation
+                    {
+                        CfgBlockId = block.Id,
+                        SourceSpan = r.Expression.Span,
+
+                        Kind = CounterKind.MethodExit,
+                        Id = _numCounters++,
+                        Method = method
+                    };
+                    _counters.Add(exitCounter);
+                    editor.InsertBefore(firstExpression, IncrementCounter(exitCounter));
                 }
                 else if (end is CfgBlockBranch br)
                 {
                     Debug.Assert(br.Instruction != null);
+                    lastExpression = br.Instruction;
                     spanEnd = br.Instruction.Span.End;
                 }
                 else if (end is CfgBlockConditionalBranch cbr)
                 {
+                    // TODO: add a branch counter here. setup the decision & conditions
                     Debug.Assert(cbr.Cond != null);
+                    lastExpression = cbr.Cond;
                     spanEnd = cbr.Cond.Span.End;
                 }
 
@@ -85,9 +169,20 @@ namespace Tarp
                 //  - but we also want all of the other MC/DC points too! how to deal about those? those would be inside expressions or statements...
                 var realSpan = TextSpan.FromBounds(spanStart, spanEnd);
 
-                dict.Add(block, realSpan);
+                dict.Add(block.Id, realSpan);
+            
+                // mark block exit
+                var lineCounter = new CounterInformation
+                {
+                    CfgBlockId = block.Id,
+                    SourceSpan = realSpan,
+                    Kind = CounterKind.Line,
+                    Id = _numCounters++
+                };
+                _counters.Add(lineCounter);
+                editor.InsertBefore(lastExpression, IncrementCounter(lineCounter));
 
-                // slightly replace the last instruction of the block with the probe
+                // slightly modify the last instruction of the block with the probe
                 // - if no instructions at all: synthesize one...
                 // - if at least one instruction:
                 //   - e.g. x++; --> x++; IncrementProbe(<realSpan>);

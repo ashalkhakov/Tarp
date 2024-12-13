@@ -4,6 +4,8 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.FlowAnalysis;
 using Tarp.Types;
+using Microsoft.CodeAnalysis.Text;
+using Microsoft.CodeAnalysis.Editing;
 
 namespace Tarp.Tests;
 
@@ -37,10 +39,24 @@ public class McDcInstrumenterTests
 
     private void RunInstrumenterOnFile(string filepath)
     {
+        var workspace = new AdhocWorkspace();
+        var projectId = ProjectId.CreateNewId();
+        var versionStamp = VersionStamp.Create();
+        var projectInfo = ProjectInfo.Create(projectId, versionStamp, "NewProject", "projName", LanguageNames.CSharp);
+        var newProject = workspace.AddProject(projectInfo);
+        
         var test = CreateAssembly(filepath);
 
         var sourceTree = test.SyntaxTrees.Single();
         var model = test.GetSemanticModel(sourceTree);
+
+        var document = workspace.AddDocument(newProject.Id, "test.cs", SourceText.From(sourceTree.ToString()));
+        var syntaxRoot = document.GetSyntaxRootAsync().Result;
+
+        var root = (CompilationUnitSyntax)syntaxRoot;
+
+        var editor = DocumentEditor.CreateAsync(document).Result;
+
         /*
         var instrumenter = new McDcInstrumenter();
         
@@ -70,6 +86,9 @@ public class McDcInstrumenterTests
             bar.Visit(method);
 
             var dot = bar.GraphBuilder.EmitCFG();
+
+            var instrumenter = new CfgBasedMcDcInstrumenter();
+            instrumenter.Instrument(method, editor);
         }
     }
 }
