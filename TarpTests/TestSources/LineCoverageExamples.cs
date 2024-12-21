@@ -119,6 +119,20 @@ namespace TarpTests.TestSources
         public void M7(int x)
         {
             // <-- entry probe
+            /*
+             * compiles to:
+             * IEnumerator<int> tmp;
+             * tmp = Enumerable.Range(0, x).GetEnumerator() // of type IEnumerable or whatever
+             * try {
+             *   goto IL_001a;
+             *   Console.WriteLine(tmp.Current);
+             *   IL_001a: if (tmp.MoveNext()) {goto IL_000f;} else {goto IL_002e;}
+             * }
+             * finally {
+             *   tmp.Dispose();
+             * }
+             * IL_002e:
+             */
             foreach (var i in Enumerable.Range(0, x)) // FIXME: how to put a probe onto the evaluation of Enumerable.Range(0,x) itself???
             {
                 // <-- probe: the decision in [foreach (var i in Enumerable.Range(0, x))] evaluates to true
