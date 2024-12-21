@@ -13,6 +13,7 @@ namespace Tarp;
  * - ensure all conditionals and loops use { blocks }
  * - rewrite all expression-bodied methods to { return ExpressionBody; }
  * - rewrite all return E into tmp = E; return tmp
+ * - add an explicit [return] at the very end of each method
  * 
  * This is will be our "normal form".
  */
@@ -99,9 +100,11 @@ public class SourceToNf : CSharpSyntaxRewriter
         Debug.Assert(node.Body != null && node.ExpressionBody == null ||
             node.Body == null && node.ExpressionBody != null);
 
+        MethodDeclarationSyntax rewrittenNode;
+
         if (node.Body != null)
         {
-            return base.VisitMethodDeclaration(node);
+            rewrittenNode = (MethodDeclarationSyntax)base.VisitMethodDeclaration(node);
         }
         else if (node.ExpressionBody != null)
         {
@@ -109,21 +112,53 @@ public class SourceToNf : CSharpSyntaxRewriter
 
             var exprBody = node.ExpressionBody;
 
-            var ret = SyntaxFactory.ReturnStatement(
+            var ret = ReturnStatement(
                 exprBody.Expression
-                    .WithLeadingTrivia(SyntaxFactory.SyntaxTrivia(SyntaxKind.WhitespaceTrivia, " ")));
+                    .WithLeadingTrivia(SyntaxTrivia(SyntaxKind.WhitespaceTrivia, " ")));
 
-            var newBody = SyntaxFactory.Block(ret);
+            var newBody = Block(ret);
             var newNode = node
                 .RemoveNode(node.ExpressionBody, SyntaxRemoveOptions.KeepNoTrivia)
                 .WithBody(newBody);
 
-            return base.VisitMethodDeclaration(newNode);
+            rewrittenNode = (MethodDeclarationSyntax)base.VisitMethodDeclaration(newNode);
         }
         else
         {
             throw new NotImplementedException();
         }
+
+        if (!IsLastStatementAReturn(rewrittenNode.Body))
+        {
+            // add an explicit return, even if it's just a void method
+            var ret = ReturnStatement();
+
+            var newBody = rewrittenNode.Body.AddStatements(ret);
+
+            rewrittenNode =
+                rewrittenNode.WithBody(newBody);
+        }
+
+        return rewrittenNode;
+    }
+
+    private bool IsLastStatementAReturn(BlockSyntax block)
+    {
+        if (block.Statements.Count == 0)
+        {
+            return false;
+        }
+
+        var last = block.Statements.Last();
+        if (last is ReturnStatementSyntax rs)
+        {
+            return true;
+        }
+        else if (last is BlockSyntax subBlock)
+        {
+            return IsLastStatementAReturn(subBlock);
+        }
+        return false;
     }
 
     public override SyntaxNode VisitAnonymousMethodExpression(AnonymousMethodExpressionSyntax node)
@@ -169,7 +204,7 @@ public class SourceToNf : CSharpSyntaxRewriter
                             TriviaList()))
                     .WithTrailingTrivia(SyntaxTrivia(SyntaxKind.WhitespaceTrivia, " ")))
                 .WithVariables(
-                    SingletonSeparatedList<VariableDeclaratorSyntax>(
+                    SingletonSeparatedList(
                         VariableDeclarator(
                             Identifier(name))
                         .WithInitializer(

@@ -8,7 +8,6 @@ namespace TarpTests.TestSources;
 
 public class Instrument1
 {
-    /*
     public void Foo(int x)
     {
 
@@ -127,7 +126,7 @@ public class Instrument1
         return r;
     }
     #endregion
-    */
+
     #region Switch
     public int Method5(int c)
     {
