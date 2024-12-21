@@ -9,7 +9,13 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Tarp", "Tarp\Tarp.csproj", 
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "TarpTests", "TarpTests\TarpTests.csproj", "{F8E6FEF8-EEAA-4049-A576-DB69EEF68098}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TarpTestApp", "TarpTestApp\TarpTestApp.csproj", "{FB8EEA33-0F37-4A20-A304-5080560BB410}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "TarpTestApp", "TarpTestApp\TarpTestApp.csproj", "{FB8EEA33-0F37-4A20-A304-5080560BB410}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{D89C0F99-18C3-4397-A77E-31F0569E5F06}"
+	ProjectSection(SolutionItems) = preProject
+		THOUGHTS.md = THOUGHTS.md
+		TODO.md = TODO.md
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

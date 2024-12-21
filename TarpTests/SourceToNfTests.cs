@@ -12,6 +12,7 @@ public class SourceToNfTests
     [DataTestMethod]
     [DataRow("../../../TestSources/Instrument1.cs")]
     [DataRow("../../../TestSources/AllBooleanExpressions.cs")]
+    [DataRow("../../../TestSources/NewVariablesAtReturns.cs")]
     public void Test1(string filename)
     {
         RunInstrumenterOnFile(filename);
@@ -40,7 +41,8 @@ public class SourceToNfTests
     {
         var test = CreateAssembly(filepath);
 
-        var sourceToNf = new SourceToNf();
+        var gen = new FreshNameGenerator("__tmp");
+        var sourceToNf = new SourceToNf(gen);
 
         foreach (var sourceTree in test.SyntaxTrees)
         {

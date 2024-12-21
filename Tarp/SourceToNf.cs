@@ -3,6 +3,7 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using System.Diagnostics;
 using System;
+using static Microsoft.CodeAnalysis.CSharp.SyntaxFactory;
 
 namespace Tarp;
 
@@ -11,13 +12,17 @@ namespace Tarp;
  * 
  * - ensure all conditionals and loops use { blocks }
  * - rewrite all expression-bodied methods to { return ExpressionBody; }
+ * - rewrite all return E into tmp = E; return tmp
  * 
  * This is will be our "normal form".
  */
 public class SourceToNf : CSharpSyntaxRewriter
 {
-    public SourceToNf() : base(false)
+    private FreshNameGenerator freshNameGenerator;
+
+    public SourceToNf(FreshNameGenerator freshNameGenerator) : base(false)
     {
+        this.freshNameGenerator = freshNameGenerator;
     }
 
     private static BlockSyntax StatementSyntaxToBlock(StatementSyntax statement)
@@ -124,5 +129,61 @@ public class SourceToNf : CSharpSyntaxRewriter
     public override SyntaxNode VisitAnonymousMethodExpression(AnonymousMethodExpressionSyntax node)
     {
         return base.VisitAnonymousMethodExpression(node);
+    }
+
+    public override SyntaxNode VisitReturnStatement(ReturnStatementSyntax node)
+    {
+        if (node.Expression != null && !(node.Expression is IdentifierNameSyntax) && !(node.Expression is LiteralExpressionSyntax))
+        {
+            var name = this.freshNameGenerator.GetFreshName();
+
+            var location = node.GetLocation();
+            var span = location.GetMappedLineSpan();
+
+            var lineDirective =
+                LineSpanDirectiveTrivia(
+                                LineDirectivePosition(
+                                    Literal(span.StartLinePosition.Line),
+                                    Literal(span.StartLinePosition.Character)),
+                                LineDirectivePosition(
+                                    Literal(span.EndLinePosition.Line),
+                                    Literal(span.EndLinePosition.Character)),
+                                Literal(span.Path),
+                                true)
+                .WithLeadingTrivia(LineFeed)
+                .WithTrailingTrivia(LineFeed);
+
+            var leadingTrivia =
+                node.ReturnKeyword.LeadingTrivia
+                    .Insert(0, Trivia(lineDirective));
+
+            var declarationStatement =
+            LocalDeclarationStatement(
+                VariableDeclaration(
+                    IdentifierName(
+                        Identifier(
+                            TriviaList(),
+                            SyntaxKind.VarKeyword,
+                            "var",
+                            "var",
+                            TriviaList()))
+                    .WithTrailingTrivia(SyntaxTrivia(SyntaxKind.WhitespaceTrivia, " ")))
+                .WithVariables(
+                    SingletonSeparatedList<VariableDeclaratorSyntax>(
+                        VariableDeclarator(
+                            Identifier(name))
+                        .WithInitializer(
+                            EqualsValueClause(node.Expression)))))
+            .WithLeadingTrivia(leadingTrivia);
+            var newReturnStatemnt =
+                ReturnStatement(
+                    node.ReturnKeyword.WithoutTrivia(),
+                    IdentifierName(name).WithLeadingTrivia(SyntaxTrivia(SyntaxKind.WhitespaceTrivia, " ")),
+                    node.SemicolonToken);
+
+            return Block(List<StatementSyntax>([declarationStatement, newReturnStatemnt]));
+        }
+
+        return base.VisitReturnStatement(node);
     }
 }
