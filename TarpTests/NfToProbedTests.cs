@@ -13,6 +13,7 @@ public class NfToProbedTests
     [DataRow("../../../TestSources/Instrument1.cs")]
     [DataRow("../../../TestSources/AllBooleanExpressions.cs")]
     [DataRow("../../../TestSources/NewVariablesAtReturns.cs")]
+    [DataRow("../../../TestSources/LineCoverageExamples.cs")]
     public void Test1(string filename)
     {
         RunInstrumenterOnFile(filename);

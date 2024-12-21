@@ -4,6 +4,7 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 using System.Diagnostics;
 using System;
 using static Microsoft.CodeAnalysis.CSharp.SyntaxFactory;
+using ICSharpCode.Decompiler.CSharp.Syntax;
 
 namespace Tarp;
 
@@ -14,6 +15,7 @@ namespace Tarp;
  * - rewrite all expression-bodied methods to { return ExpressionBody; }
  * - rewrite all return E into tmp = E; return tmp
  * - add an explicit [return] at the very end of each method
+ * - TODO: add { } in switch sections
  * 
  * This is will be our "normal form".
  */
@@ -140,6 +142,21 @@ public class SourceToNf : CSharpSyntaxRewriter
         }
 
         return rewrittenNode;
+    }
+
+    public override SyntaxNode? VisitSwitchSection(SwitchSectionSyntax node)
+    {
+        if (node.Statements.Count > 0 && !(node.Statements[0] is BlockSyntax))
+        {
+            var block = Block(node.Statements);
+            var syntaxList = new SyntaxList<StatementSyntax>(block);
+
+            var newNode = base.VisitSwitchSection(node.WithStatements(syntaxList));
+
+            return newNode;
+        }
+
+        return base.VisitSwitchSection(node);
     }
 
     public override SyntaxNode VisitAnonymousMethodExpression(AnonymousMethodExpressionSyntax node)
