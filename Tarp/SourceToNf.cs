@@ -128,7 +128,7 @@ public class SourceToNf : CSharpSyntaxRewriter
             throw new NotImplementedException();
         }
 
-        if (!IsLastStatementAReturn(rewrittenNode.Body))
+        if (!SyntaxHelpers.IsLastStatementAReturn(rewrittenNode.Body))
         {
             // add an explicit return, even if it's just a void method
             var ret = ReturnStatement();
@@ -140,25 +140,6 @@ public class SourceToNf : CSharpSyntaxRewriter
         }
 
         return rewrittenNode;
-    }
-
-    private bool IsLastStatementAReturn(BlockSyntax block)
-    {
-        if (block.Statements.Count == 0)
-        {
-            return false;
-        }
-
-        var last = block.Statements.Last();
-        if (last is ReturnStatementSyntax rs)
-        {
-            return true;
-        }
-        else if (last is BlockSyntax subBlock)
-        {
-            return IsLastStatementAReturn(subBlock);
-        }
-        return false;
     }
 
     public override SyntaxNode VisitAnonymousMethodExpression(AnonymousMethodExpressionSyntax node)

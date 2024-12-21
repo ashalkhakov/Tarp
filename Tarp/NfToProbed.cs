@@ -1,4 +1,5 @@
-﻿using Microsoft.CodeAnalysis;
+﻿using ICSharpCode.Decompiler.IL;
+using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using System;
@@ -73,6 +74,16 @@ public class NfToProbed : CSharpSyntaxRewriter
 
     public override SyntaxNode? VisitBlock(BlockSyntax node)
     {
+        // add an exit probe just before the return
+        if (node.Statements.Count > 0 && node.Statements.Last() is ReturnStatementSyntax rs)
+        {
+            var exitProbeId = this.probeGenerator.AddProbe(ProbeGenerator.ProbeKind.Exit, node.FullSpan);
+            var exitProbe = IncrementCounter(exitProbeId);
+
+            var newNode = node.InsertNodesBefore(rs, new[] { exitProbe });
+            node = newNode;
+        }
+
         return base.VisitBlock(node);
     }
 }
