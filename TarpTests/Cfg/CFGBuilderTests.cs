@@ -3,6 +3,7 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Tarp.Cfg;
+using FluentAssertions;
 
 namespace TarpTests.Cfg;
 
@@ -10,7 +11,30 @@ namespace TarpTests.Cfg;
 public class CFGBuilderTests
 {
     [TestMethod]
-    public void Test()
+    public void TestLocalDeclarationsAndSequence()
+    {
+        string code = @"
+public class MyClass
+{
+    public int MyMethod(int x, int y)
+    {
+        x += 1;
+        var z = 2 * x;
+
+        y = x + 2;
+
+        return x + y + z;
+    }
+}";
+
+        var results = GetCFGsFromSource(code);
+
+        var expected = File.ReadAllText($@"Cfg/Json/{nameof(TestLocalDeclarationsAndSequence)}.gv");
+        results.Should().BeEquivalentTo(expected);
+    }
+
+    [TestMethod]
+    public void TestIfThenElseAndWhile()
     {
         string code = @"
 public class MyClass
@@ -35,22 +59,32 @@ public class MyClass
         }
     }
 }";
+        var results = GetCFGsFromSource(code);
 
+        var expected = File.ReadAllText($@"Cfg/Json/{nameof(TestIfThenElseAndWhile)}.gv");
+        results.Should().BeEquivalentTo(expected);
+    }
+
+
+    List<string> GetCFGsFromSource(string code)
+    {
         // Parse the code
         SyntaxTree tree = CSharpSyntaxTree.ParseText(code);
         CompilationUnitSyntax root = tree.GetCompilationUnitRoot();
 
-        // Create and use the CFG builder
-        var cfgBuilder = new CFGBuilder();
+        var results = new List<string>();
 
         foreach (var method in root.DescendantNodes().OfType<MethodDeclarationSyntax>().Cast<MethodDeclarationSyntax>())
         {
+            var cfgBuilder = new CFGBuilder();
+
             var cfg = cfgBuilder.Build(method);
 
-            // Output the CFG
-            var dot = cfg.EmitCFG();
-            Console.WriteLine("Control Flow Graph");
-            Console.WriteLine(dot);
+            cfg.SanityCheck();
+
+            results.Add(cfg.EmitCFG());
         }
+
+        return results;
     }
 }

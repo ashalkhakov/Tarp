@@ -12,10 +12,7 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
 
     public ControlFlowGraph Build(SyntaxNode root)
     {
-        _cfg.Exit = _cfg.AddNewNode(CFGNode.CFGNodeKind.Exit);
-        _cfg.Entry = _cfg.AddNewNode(CFGNode.CFGNodeKind.Entry);
-
-        _currentNode = _cfg.Entry;
+        _currentNode = _cfg.EntryNode;
 
         Visit(root);
 
@@ -27,9 +24,9 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
         // Visit method body
         Visit(node.Body);
 
-        if (_currentNode.Kind != CFGNode.CFGNodeKind.Exit && _currentNode.Successors.Count == 0)
+        if (_currentNode.Kind != CFGNodeKind.Exit && _currentNode.Successors.Count == 0)
         {
-            _currentNode.Successors.Add(_cfg.Exit);
+            _currentNode.AddSuccessor(_cfg.ExitNode);
         }
 
         return _currentNode;
@@ -49,17 +46,15 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
     {
         if (node.Else == null)
         {
-            var ifBranch = _cfg.AddNewNode(CFGNode.CFGNodeKind.Branch);
-            var ifExit = _cfg.AddNewNode(CFGNode.CFGNodeKind.Block);
-            var ifBody = _cfg.AddNewNode(CFGNode.CFGNodeKind.Block);
+            var ifBranch = _cfg.AddNewNode(CFGNodeKind.Branch);
+            var ifExit = _cfg.AddNewNode(CFGNodeKind.Block);
+            var ifBody = _cfg.AddNewNode(CFGNodeKind.Block);
 
-            _currentNode.Successors.Add(ifBranch);
+            _currentNode.AddSuccessor(ifBranch);
 
-            ifBranch.Condition = node.Condition;
-            ifBranch.Successors.Add(ifBody); // if true
-            ifBranch.Successors.Add(ifExit); // if false
+            ifBranch.ToBranch(node.Condition, ifBody, ifExit);
 
-            ifBody.Successors.Add(ifExit);
+            ifBody.AddSuccessor(ifExit);
 
             _currentNode = ifBody;
 
@@ -71,19 +66,17 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
         }
         else
         {
-            var ifBranch = _cfg.AddNewNode(CFGNode.CFGNodeKind.Branch);
-            var ifExit = _cfg.AddNewNode(CFGNode.CFGNodeKind.Block);
-            var ifBody = _cfg.AddNewNode(CFGNode.CFGNodeKind.Block);
-            var elseBody = _cfg.AddNewNode(CFGNode.CFGNodeKind.Block);
+            var ifBranch = _cfg.AddNewNode(CFGNodeKind.Branch);
+            var ifExit = _cfg.AddNewNode(CFGNodeKind.Block);
+            var ifBody = _cfg.AddNewNode(CFGNodeKind.Block);
+            var elseBody = _cfg.AddNewNode(CFGNodeKind.Block);
 
-            _currentNode.Successors.Add(ifBranch);
+            _currentNode.AddSuccessor(ifBranch);
 
-            ifBranch.Condition = node.Condition;
-            ifBranch.Successors.Add(ifBody); // if true
-            ifBranch.Successors.Add(elseBody); // if false
+            ifBranch.ToBranch(node.Condition, ifBody, elseBody);
 
-            ifBody.Successors.Add(ifExit);
-            elseBody.Successors.Add(ifExit);
+            ifBody.AddSuccessor(ifExit);
+            elseBody.AddSuccessor(ifExit);
 
             _currentNode = ifBody;
 
@@ -101,17 +94,15 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
 
     public override CFGNode VisitWhileStatement(WhileStatementSyntax node)
     {
-        var loopEntry = _cfg.AddNewNode(CFGNode.CFGNodeKind.Branch);
-        var loopExit = _cfg.AddNewNode(CFGNode.CFGNodeKind.Block);
-        var loopBody = _cfg.AddNewNode(CFGNode.CFGNodeKind.Block);
+        var loopEntry = _currentNode;
+        var loopExit = _cfg.AddNewNode(CFGNodeKind.Block);
+        var loopBody = _cfg.AddNewNode(CFGNodeKind.Block);
 
-        _currentNode.Successors.Add(loopEntry);
+        loopEntry.Kind = CFGNodeKind.Branch;
 
-        loopEntry.Condition = node.Condition;
-        loopEntry.Successors.Add(loopBody); // if true
-        loopEntry.Successors.Add(loopExit); // if false
+        loopEntry.ToBranch(node.Condition, loopBody, loopExit);
 
-        loopBody.Successors.Add(loopEntry);
+        loopBody.AddSuccessor(loopEntry);
 
         _currentNode = loopBody;
 
@@ -143,22 +134,22 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
         {
             if (cond != null)
             {
-                _currentNode.Kind = CFGNode.CFGNodeKind.Branch;
+                var newNode = _cfg.AddNewNode(CFGNodeKind.Block);
+                _currentNode.Kind = CFGNodeKind.Branch;
                 _currentNode.Condition = cond;
-                var newNode = _cfg.AddNewNode(CFGNode.CFGNodeKind.Block);
-                _currentNode.Successors.Add(newNode);
+                _currentNode.AddSuccessor(newNode);
                 _currentNode = newNode;
             }
             else
             {
-                _currentNode.Successors.Add(_cfg.Exit);
-                var newNode = _cfg.AddNewNode(CFGNode.CFGNodeKind.Block);
+                _currentNode.AddSuccessor(_cfg.ExitNode);
+                var newNode = _cfg.AddNewNode(CFGNodeKind.Block);
                 _currentNode = newNode;
             }
         }
         else
         {
-            _currentNode.Statements.Add(node);
+            _currentNode.AddStatement(node);
         }
     }
 
