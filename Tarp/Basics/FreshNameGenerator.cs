@@ -1,4 +1,4 @@
-﻿namespace Tarp;
+﻿namespace Tarp.Basics;
 
 public class FreshNameGenerator(string prefix)
 {

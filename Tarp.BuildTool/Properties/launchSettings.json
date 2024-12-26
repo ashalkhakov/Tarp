@@ -1,0 +1,9 @@
+{
+  "profiles": {
+    "Tarp.BuildTool": {
+      "commandName": "Project",
+      "commandLineArgs": "-p TarpTestApp/TarpTestApp.csproj -o Instrumented",
+      "workingDirectory": "C:\\Users\\User\\source\\projects\\McDcTestCoverage"
+    }
+  }
+}

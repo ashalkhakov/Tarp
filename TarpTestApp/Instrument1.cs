@@ -8,7 +8,6 @@ namespace TarpTests.TestSources;
 
 public class Instrument1
 {
-    /*
     public void Foo(int x)
     {
 
@@ -127,7 +126,7 @@ public class Instrument1
         return r;
     }
     #endregion
-    */
+
     #region Switch
     public int Method5(int c)
     {
@@ -175,7 +174,7 @@ public class Instrument1
         return 3;
     }
     #endregion
-    /*
+
     public void Method1(int a, int b, int c, int x, int y, int z)
     {
         int max;
@@ -229,5 +228,5 @@ public class Instrument1
                     return fibcache[i];
                 }
         }
-    }*/
+    }
 }

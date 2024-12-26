@@ -2,8 +2,10 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Tarp;
+using Tarp.Basics;
+using Tarp.Rewriting;
 
-namespace TarpTests;
+namespace TarpTests.Rewriting;
 
 [TestClass]
 public class NfToProbedTests

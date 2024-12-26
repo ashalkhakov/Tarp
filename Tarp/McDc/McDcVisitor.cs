@@ -28,7 +28,7 @@ using Tarp.Types;
  * - d ? e1 : e2, where d is a decision, can be a condition if both e1 and e2 are of type bool
  */
 
-namespace Tarp;
+namespace Tarp.McDc;
 
 public class McDcVisitor : CSharpSyntaxVisitor
 {

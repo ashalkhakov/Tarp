@@ -40,3 +40,17 @@ decision 0 = A || B:
   condition 1 = B
 
 the functions are identities, but they have the side-effect of incrementing the corresponding counter.
+
+
+# on building!
+
+need a build-time tool:
+- mytool run MyProject.csproj # builds the project with instrumentation
+- then you can run your tests
+- mytool report ... # provide path to the hit files etc.
+
+what's the preprocessor task?
+- given a csproj file, run the preprocessor and output things to a new directory, say "preproc"
+- you'll get a mirror of the current code
+- you will then use msbuild & the rest on the mirror
+- but the results of building the mirror would go inside the usual projects

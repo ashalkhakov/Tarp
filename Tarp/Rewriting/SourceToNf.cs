@@ -4,9 +4,9 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 using System.Diagnostics;
 using System;
 using static Microsoft.CodeAnalysis.CSharp.SyntaxFactory;
-using ICSharpCode.Decompiler.CSharp.Syntax;
+using Tarp.Basics;
 
-namespace Tarp;
+namespace Tarp.Rewriting;
 
 /*
  * The idea of this rewriter is to ensure some invariants over source code that we will use to our advantage later.
@@ -36,7 +36,7 @@ public class SourceToNf : CSharpSyntaxRewriter
         }
         else
         {
-            var newBlock = SyntaxFactory.Block(statement);
+            var newBlock = Block(statement);
 
             return newBlock;
         }
@@ -168,7 +168,7 @@ public class SourceToNf : CSharpSyntaxRewriter
     {
         if (node.Expression != null && !(node.Expression is IdentifierNameSyntax) && !(node.Expression is LiteralExpressionSyntax))
         {
-            var name = this.freshNameGenerator.GetFreshName();
+            var name = freshNameGenerator.GetFreshName();
 
             var location = node.GetLocation();
             var span = location.GetMappedLineSpan();

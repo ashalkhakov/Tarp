@@ -1,13 +1,12 @@
-﻿using ICSharpCode.Decompiler.CSharp.Syntax;
-using Microsoft.CodeAnalysis;
+﻿using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
-using System;
 using System.Collections.Generic;
 using System.Linq;
+using Tarp.Basics;
 using static Microsoft.CodeAnalysis.CSharp.SyntaxFactory;
 
-namespace Tarp;
+namespace Tarp.Rewriting;
 
 public class NfToProbed : CSharpSyntaxRewriter
 {
@@ -18,7 +17,7 @@ public class NfToProbed : CSharpSyntaxRewriter
     public NfToProbed(ProbeGenerator probeGenerator)
     {
         this.probeGenerator = probeGenerator;
-        this.counterIncreaseMethodName = IdentifierName("TARPGEN.C.Inc"); // TODO: ensure it's fresh
+        counterIncreaseMethodName = IdentifierName("TARPGEN.C.Inc"); // TODO: ensure it's fresh
     }
 
     public override SyntaxNode? VisitClassDeclaration(ClassDeclarationSyntax node)
@@ -32,7 +31,7 @@ public class NfToProbed : CSharpSyntaxRewriter
         var id = Literal(counterId);
 
         var expr0 = InvocationExpression(
-            this.counterIncreaseMethodName,
+            counterIncreaseMethodName,
             ArgumentList(SingletonSeparatedList(Argument(LiteralExpression(SyntaxKind.NumericLiteralExpression, id))))
         );
         var expr = ExpressionStatement(expr0);
@@ -42,12 +41,12 @@ public class NfToProbed : CSharpSyntaxRewriter
 
     public override SyntaxNode? VisitMethodDeclaration(MethodDeclarationSyntax node)
     {
-        this.probeGenerator.StartMethod(node.GetLocation(), currentClassOrStruct, node.Identifier.Text);
+        probeGenerator.StartMethod(node.GetLocation(), currentClassOrStruct, node.Identifier.Text);
 
         var block = node.Body;
         var openingBraceSpan = block.OpenBraceToken.Span;
 
-        var entryProbeId = this.probeGenerator.AddProbe(ProbeGenerator.ProbeKind.Entry, openingBraceSpan);
+        var entryProbeId = probeGenerator.AddProbe(ProbeGenerator.ProbeKind.Entry, openingBraceSpan);
         var entryProbe = IncrementCounter(entryProbeId);
 
         var statementsWithEntryCounter = node.Body.Statements
@@ -74,7 +73,7 @@ public class NfToProbed : CSharpSyntaxRewriter
                 var span = GetSpanBefore(spanStart, statement);
                 spanStart = statement.Span.End;
 
-                var exitProbeId = this.probeGenerator.AddProbe(ProbeGenerator.ProbeKind.Exit, span);
+                var exitProbeId = probeGenerator.AddProbe(ProbeGenerator.ProbeKind.Exit, span);
                 var exitProbe = IncrementCounter(exitProbeId);
 
                 newStatements.Add(exitProbe);
@@ -85,7 +84,7 @@ public class NfToProbed : CSharpSyntaxRewriter
                 var span = GetSpanBefore(spanStart, statement);
                 spanStart = statement.Span.End;
 
-                var exitProbeId = this.probeGenerator.AddProbe(ProbeGenerator.ProbeKind.Block, span);
+                var exitProbeId = probeGenerator.AddProbe(ProbeGenerator.ProbeKind.Block, span);
                 var exitProbe = IncrementCounter(exitProbeId);
 
                 newStatements.Add(exitProbe);
@@ -96,7 +95,7 @@ public class NfToProbed : CSharpSyntaxRewriter
                 var span = GetSpanBefore(spanStart, statement);
                 spanStart = statement.Span.End;
 
-                var exitProbeId = this.probeGenerator.AddProbe(ProbeGenerator.ProbeKind.Block, span);
+                var exitProbeId = probeGenerator.AddProbe(ProbeGenerator.ProbeKind.Block, span);
                 var exitProbe = IncrementCounter(exitProbeId);
 
                 newStatements.Add(exitProbe);
@@ -107,7 +106,7 @@ public class NfToProbed : CSharpSyntaxRewriter
                 var span = GetSpanBefore(spanStart, statement);
                 spanStart = statement.Span.End;
 
-                var exitProbeId = this.probeGenerator.AddProbe(ProbeGenerator.ProbeKind.Block, span);
+                var exitProbeId = probeGenerator.AddProbe(ProbeGenerator.ProbeKind.Block, span);
                 var exitProbe = IncrementCounter(exitProbeId);
 
                 newStatements.Add(exitProbe);
@@ -118,7 +117,7 @@ public class NfToProbed : CSharpSyntaxRewriter
                 var span = GetSpanBefore(spanStart, statement);
                 spanStart = statement.Span.End;
 
-                var exitProbeId = this.probeGenerator.AddProbe(ProbeGenerator.ProbeKind.Block, span);
+                var exitProbeId = probeGenerator.AddProbe(ProbeGenerator.ProbeKind.Block, span);
                 var exitProbe = IncrementCounter(exitProbeId);
 
                 newStatements.Add(exitProbe);
@@ -129,7 +128,7 @@ public class NfToProbed : CSharpSyntaxRewriter
                 var span = GetSpanBefore(spanStart, statement);
                 spanStart = statement.Span.End;
 
-                var exitProbeId = this.probeGenerator.AddProbe(ProbeGenerator.ProbeKind.Block, span);
+                var exitProbeId = probeGenerator.AddProbe(ProbeGenerator.ProbeKind.Block, span);
                 var exitProbe = IncrementCounter(exitProbeId);
 
                 newStatements.Add(exitProbe);
@@ -140,7 +139,7 @@ public class NfToProbed : CSharpSyntaxRewriter
                 var span = GetSpanBefore(spanStart, statement);
                 spanStart = statement.Span.End;
 
-                var exitProbeId = this.probeGenerator.AddProbe(ProbeGenerator.ProbeKind.Block, span);
+                var exitProbeId = probeGenerator.AddProbe(ProbeGenerator.ProbeKind.Block, span);
                 var exitProbe = IncrementCounter(exitProbeId);
 
                 newStatements.Add(exitProbe);
@@ -151,7 +150,7 @@ public class NfToProbed : CSharpSyntaxRewriter
                 var span = GetSpanBefore(spanStart, statement);
                 spanStart = statement.Span.End;
 
-                var exitProbeId = this.probeGenerator.AddProbe(ProbeGenerator.ProbeKind.Block, span);
+                var exitProbeId = probeGenerator.AddProbe(ProbeGenerator.ProbeKind.Block, span);
                 var exitProbe = IncrementCounter(exitProbeId);
 
                 newStatements.Add(exitProbe);
@@ -162,7 +161,7 @@ public class NfToProbed : CSharpSyntaxRewriter
                 var span = GetSpanBefore(spanStart, statement);
                 spanStart = statement.Span.End;
 
-                var exitProbeId = this.probeGenerator.AddProbe(ProbeGenerator.ProbeKind.Block, span);
+                var exitProbeId = probeGenerator.AddProbe(ProbeGenerator.ProbeKind.Block, span);
                 var exitProbe = IncrementCounter(exitProbeId);
 
                 newStatements.Add(exitProbe);
@@ -174,16 +173,16 @@ public class NfToProbed : CSharpSyntaxRewriter
             }
         }
 
-        if ((node.Parent is WhileStatementSyntax
+        if (node.Parent is WhileStatementSyntax
             || node.Parent is DoStatementSyntax
             || node.Parent is ForStatementSyntax
             || node.Parent is ForEachStatementSyntax
             || node.Parent is IfStatementSyntax
-            || node.Parent is ElseClauseSyntax))
+            || node.Parent is ElseClauseSyntax)
         {
             // put a probe at the very end of this block
             var span = GetSpanBefore(spanStart, newStatements.Last());
-            var exitProbeId = this.probeGenerator.AddProbe(ProbeGenerator.ProbeKind.Block, span);
+            var exitProbeId = probeGenerator.AddProbe(ProbeGenerator.ProbeKind.Block, span);
             var exitProbe = IncrementCounter(exitProbeId);
             newStatements.Add(exitProbe);
         }
@@ -216,7 +215,7 @@ public class NfToProbed : CSharpSyntaxRewriter
                 var span = GetSpanBefore(spanStart, statement);
                 spanStart = statement.Span.End;
 
-                var exitProbeId = this.probeGenerator.AddProbe(ProbeGenerator.ProbeKind.Exit, span);
+                var exitProbeId = probeGenerator.AddProbe(ProbeGenerator.ProbeKind.Exit, span);
                 var exitProbe = IncrementCounter(exitProbeId);
 
                 newStatements.Add(exitProbe);

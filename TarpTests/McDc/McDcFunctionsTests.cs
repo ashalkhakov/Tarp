@@ -4,16 +4,12 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using Tarp;
 
-namespace TarpTests;
-
-[TestClass]
-public class DecompilerBasicTests
+namespace TarpTests.McDc
 {
-    [TestMethod]
-    public void Test()
+    [TestClass]
+    public class McDcFunctionsTests
     {
-        DecompilerBasic.Decompile("TarpTestApp.dll");
+
     }
 }

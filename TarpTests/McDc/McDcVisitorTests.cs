@@ -4,8 +4,9 @@ using Microsoft.CodeAnalysis;
 using FluentAssertions;
 using Tarp.Types;
 using System.Diagnostics;
+using Tarp.McDc;
 
-namespace Tarp.Tests;
+namespace TarpTests.McDc;
 
 [TestClass()]
 public class McDcVisitorTests
@@ -205,11 +206,11 @@ public class McDcVisitorTests
     private McDcTree McDcTreeOfNode(McDcNode node)
     {
         Debug.Assert(node != null);
-        
+
         if (node.Kind == McDcNodeKind.Condition)
         {
             Debug.Assert(node.Children == null);
-            
+
             return new McDcCond(node.SyntaxNode.ToFullString());
         }
         else
@@ -249,7 +250,7 @@ public class McDcVisitorTests
 
         visitor.
         Stack.Should().BeEmpty();
-        
+
         var roots = visitor.Roots;
 
         var functions = new McDcFunctions();
@@ -264,23 +265,23 @@ public class McDcVisitorTests
         CheckMarkerFunction(markerFunctions[1], 8, false, -1, 4, true, -1, "b ",
             new PathElement
             (
-                "b || c", 
-                SideOfParent.Left, 
+                "b || c",
+                SideOfParent.Left,
                 new PathElement
                 (
-                    "(a == 5) && (b || c)", 
+                    "(a == 5) && (b || c)",
                     SideOfParent.Right,
                     null
                 )
             ));
         CheckMarkerFunction(markerFunctions[2], 32, true, -4, 16, true, -13, "c",
             new PathElement(
-                "b || c", 
-                SideOfParent.Right, 
+                "b || c",
+                SideOfParent.Right,
                 new PathElement
                 (
-                    "(a == 5) && (b || c)", 
-                    SideOfParent.Right, 
+                    "(a == 5) && (b || c)",
+                    SideOfParent.Right,
                     null
                 )
             ));

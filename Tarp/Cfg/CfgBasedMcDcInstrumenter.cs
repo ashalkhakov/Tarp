@@ -8,7 +8,7 @@ using System.Diagnostics;
 using System.Threading.Tasks;
 using Tarp.Types;
 
-namespace Tarp;
+namespace Tarp.Cfg;
 
 public class CfgBasedMcDcInstrumenter
 {
@@ -167,7 +167,7 @@ public class CfgBasedMcDcInstrumenter
             var realSpan = TextSpan.FromBounds(spanStart, spanEnd);
 
             dict.Add(block.Id, realSpan);
-        
+
             // mark block exit
             var lineCounter = new CounterInformation
             {

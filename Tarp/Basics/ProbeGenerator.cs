@@ -1,17 +1,19 @@
 ﻿using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using static Microsoft.CodeAnalysis.CSharp.SyntaxFactory;
 
-namespace Tarp
+namespace Tarp.Basics
 {
     public class ProbeGenerator
     {
         public ProbeGenerator()
         {
-
         }
 
         private List<ProbeMethodInfo> probeMethods = new List<ProbeMethodInfo>();
@@ -26,16 +28,32 @@ namespace Tarp
                 Name = methodName,
                 Probes = new()
             };
-            this.probeMethods.Add(method);
+            probeMethods.Add(method);
         }
 
         public int AddProbe(ProbeKind kind, TextSpan textSpan)
         {
-            Debug.Assert(this.probeMethods.Count > 0);
+            Debug.Assert(probeMethods.Count > 0);
             var probe = new ProbeInfo { Id = counter++, Kind = kind, TextSpan = textSpan };
-            this.probeMethods.Last().Probes.Add(probe);
+            probeMethods.Last().Probes.Add(probe);
 
             return probe.Id;
+        }
+
+        public CompilationUnitSyntax GenerateInstrumentationSupportCode()
+        {
+            var usingSystemIo = UsingDirective(QualifiedName(IdentifierName("System"), IdentifierName("IO")));
+            var usings = SyntaxList.Create([usingSystemIo]);
+            var tree = CompilationUnit().WithUsings(usings);
+            /*
+            var tarpGen = IdentifierName(Identifier("TARPGEN"));
+            var namespaceDecl = NamespaceDeclaration(tarpGen)
+                .WithMembers();
+
+            tree.WithMembers(SyntaxList.Create([NamespaceDeclaration()]));
+
+            return tree;*/
+            throw new NotImplementedException();
         }
 
         public void Dump()

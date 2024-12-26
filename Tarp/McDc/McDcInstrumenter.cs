@@ -6,7 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 
-namespace Tarp;
+namespace Tarp.McDc;
 
 public class McDcInstrumenter : CSharpSyntaxRewriter
 {
@@ -231,7 +231,7 @@ public class McDcInstrumenter : CSharpSyntaxRewriter
 
         SyntaxToken switchKeyword = VisitToken(node.SwitchKeyword);
         SyntaxToken openParenToken = VisitToken(node.OpenParenToken);
-        
+
         ExpressionSyntax expression = (ExpressionSyntax)Visit(node.Expression);
 
         SyntaxToken closeParenToken = VisitToken(node.CloseParenToken);
@@ -247,7 +247,7 @@ public class McDcInstrumenter : CSharpSyntaxRewriter
             var expr = IncrementCounter(c);
 
             var newStatements = new List<StatementSyntax>(section.Statements.Count);
-            newStatements.Add(expr);            
+            newStatements.Add(expr);
 
             foreach (var statement in section.Statements)
             {
@@ -390,7 +390,7 @@ public class McDcInstrumenter : CSharpSyntaxRewriter
         var startAppendSyntaxCount = _appendStatements.Count;
 
         SyntaxToken openBraceToken = VisitToken(node.OpenBraceToken);
-        
+
         var newStatements = new List<StatementSyntax>(node.Statements.Count);
         foreach (var statement in node.Statements)
         {
@@ -403,7 +403,7 @@ public class McDcInstrumenter : CSharpSyntaxRewriter
             }
 
             newStatements.Add((StatementSyntax)newStatement);
-            
+
             while (_appendStatements.Count > startAppendSyntaxCount)
             {
                 var n = _appendStatements.Pop();
@@ -518,7 +518,7 @@ public class McDcInstrumenter : CSharpSyntaxRewriter
     // all other nodes have at least one in-edge and one out-edge
     // 
     // TODO: what should we do about dead code?
-    
+
     public void Instrument(ControlFlowGraph cfg)
     {
         /*

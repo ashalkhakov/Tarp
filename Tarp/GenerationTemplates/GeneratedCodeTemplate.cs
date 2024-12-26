@@ -6,14 +6,14 @@ namespace TARPGEN
     {
         private const int NumLocations = 1;
 
-        private readonly static string[] _locations = new string[NumLocations]
-        {
+        private readonly static string[] _locations =
+        [
             "foo"
-        };
-        private readonly static int[] _counters = new int[NumLocations]
-        {
+        ];
+        private readonly static int[] _counters =
+        [
             0
-        };
+        ];
 
         public static void Inc(int loc)
         {

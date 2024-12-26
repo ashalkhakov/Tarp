@@ -6,8 +6,9 @@ using Microsoft.CodeAnalysis.FlowAnalysis;
 using Tarp.Types;
 using Microsoft.CodeAnalysis.Text;
 using Microsoft.CodeAnalysis.Editing;
+using Tarp.Cfg;
 
-namespace Tarp.Tests;
+namespace TarpTests.McDc;
 
 [TestClass]
 public class McDcInstrumenterTests
@@ -44,7 +45,7 @@ public class McDcInstrumenterTests
         var versionStamp = VersionStamp.Create();
         var projectInfo = ProjectInfo.Create(projectId, versionStamp, "NewProject", "projName", LanguageNames.CSharp);
         var newProject = workspace.AddProject(projectInfo);
-        
+
         var test = CreateAssembly(filepath);
 
         var sourceTree = test.SyntaxTrees.Single();

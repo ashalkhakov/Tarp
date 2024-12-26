@@ -5,7 +5,7 @@ using System.Diagnostics;
 using System.IO;
 using Tarp.Types;
 
-namespace Tarp;
+namespace Tarp.Cfg;
 
 /// <summary>
 /// The design is based on https://plv.mpi-sws.org/plerg/papers/ramsey-cfg-zipper-2up.pdf

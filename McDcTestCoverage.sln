@@ -17,6 +17,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 		TODO.md = TODO.md
 	EndProjectSection
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Tarp.BuildTool", "Tarp.BuildTool\Tarp.BuildTool.csproj", "{F3E1AEE0-690C-4FA6-9468-BFB9F4E1DD71}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -39,6 +41,10 @@ Global
 		{FB8EEA33-0F37-4A20-A304-5080560BB410}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{FB8EEA33-0F37-4A20-A304-5080560BB410}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{FB8EEA33-0F37-4A20-A304-5080560BB410}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F3E1AEE0-690C-4FA6-9468-BFB9F4E1DD71}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F3E1AEE0-690C-4FA6-9468-BFB9F4E1DD71}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F3E1AEE0-690C-4FA6-9468-BFB9F4E1DD71}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F3E1AEE0-690C-4FA6-9468-BFB9F4E1DD71}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

@@ -1,6 +1,6 @@
 ﻿using Microsoft.CodeAnalysis.CSharp.Syntax;
 
-namespace Tarp;
+namespace Tarp.Rewriting;
 
 internal static class SyntaxHelpers
 {

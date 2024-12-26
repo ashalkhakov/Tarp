@@ -5,7 +5,7 @@ using Tarp.Types;
 using Microsoft.CodeAnalysis;
 using System.Diagnostics;
 
-namespace Tarp
+namespace Tarp.McDc
 {
     /*
      * see: https://conservancy.umn.edu/bitstream/handle/11299/217382/monitorAlgorithm_0.pdf?sequence=1
@@ -68,11 +68,11 @@ namespace Tarp
             //Debug.Assert(r >= 0 && r < 32);
             //Debug.Assert(l <= r);
 
-            var min = 1 << (2 * l);
-            var min2 = 1 << (2 * l + 1);
+            var min = 1 << 2 * l;
+            var min2 = 1 << 2 * l + 1;
 
-            var max = 1 << (2 * r);
-            var max2 = 1 << (2 * r + 1);
+            var max = 1 << 2 * r;
+            var max2 = 1 << 2 * r + 1;
 
             return mask | min | min2 | max | max2;
         }
@@ -89,8 +89,8 @@ namespace Tarp
                 var tl = path.Up;
                 if (n.Side == SideOfParent.Right &&
                     (
-                        (n.Expr.SyntaxNode is BinaryExpressionSyntax a && a.IsKind(SyntaxKind.LogicalAndExpression) && v == false) ||
-                        (n.Expr.SyntaxNode is BinaryExpressionSyntax o && o.IsKind(SyntaxKind.LogicalOrExpression) && v == true)
+                        n.Expr.SyntaxNode is BinaryExpressionSyntax a && a.IsKind(SyntaxKind.LogicalAndExpression) && v == false ||
+                        n.Expr.SyntaxNode is BinaryExpressionSyntax o && o.IsKind(SyntaxKind.LogicalOrExpression) && v == true
                     ))
                 {
                     mask = AddToMask(mask, n.Expr.MaskL, n.Expr.MaskR);
@@ -122,10 +122,10 @@ namespace Tarp
             Debug.Assert(node.Kind == McDcNodeKind.Condition);
 
             var pos = node.Position;
-            var trueBit = 1 << (2 * pos);
+            var trueBit = 1 << 2 * pos;
             var trueMask = ~SetMask(path, 0, true);
             var trueDone = DecisionComplete(path, true);
-            var falseBit = 1 << (2 * pos + 1);
+            var falseBit = 1 << 2 * pos + 1;
             var falseMask = ~SetMask(path, 0, false);
             var falseDone = DecisionComplete(path, false);
 
@@ -152,7 +152,7 @@ namespace Tarp
              * }
              */
             var result = new MarkerFunction(node, path, trueBit, trueMask, trueDone, falseBit, falseMask, falseDone);
-            
+
             return result;
         }
 
@@ -169,7 +169,7 @@ namespace Tarp
                 GenMarkers(node.Children[0], left, functions);
                 GenMarkers(node.Children[1], right, functions);
             }
-            else if (node.SyntaxNode  is PrefixUnaryExpressionSyntax u && u.IsKind(SyntaxKind.LogicalNotExpression))
+            else if (node.SyntaxNode is PrefixUnaryExpressionSyntax u && u.IsKind(SyntaxKind.LogicalNotExpression))
             {
                 Debug.Assert(node.Children != null && node.Children.Count == 1);
 

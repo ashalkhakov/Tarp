@@ -7,7 +7,7 @@ using System.Diagnostics;
 using System.Linq;
 using Tarp.Types;
 
-namespace Tarp;
+namespace Tarp.Cfg;
 
 public class CfgBuildingVisitor : CSharpSyntaxVisitor
 {
