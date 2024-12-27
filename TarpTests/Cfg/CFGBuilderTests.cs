@@ -176,6 +176,145 @@ class MyClass
     }
 
     [TestMethod]
+    public void TestIfNest()
+    {
+        string code = @"
+class MyClass
+{
+    public int Method1_2(int a, int b)
+    {
+        int ret;
+        if (a > 0)
+        {
+            if (b > 0)
+            {
+                ret = 3;
+            }
+            else
+            {
+                ret = 2;
+            }
+        }
+        else
+        {
+            if (b > 0)
+            {
+                ret = 1;
+            }
+            else
+            {
+                ret = 0;
+            }
+        }
+        return ret;
+    }
+}";
+
+        var results = GetCFGsFromSource(code);
+
+        var expected = File.ReadAllText($@"Cfg/Data/{nameof(TestIfNest)}.gv");
+        results.Should().BeEquivalentTo(expected);
+    }
+
+    [TestMethod]
+    public void TestIfNest2()
+    {
+        string code = @"
+class MyClass
+{
+    public int Method1_2(int a, int b)
+    {
+        int ret = 0;
+        if (a > 0)
+        {
+            if (b > 0)
+            {
+                ret = 3;
+            }
+            else
+            {
+                ret = 2;
+            }
+        }
+        return ret;
+    }
+}";
+
+        var results = GetCFGsFromSource(code);
+
+        var expected = File.ReadAllText($@"Cfg/Data/{nameof(TestIfNest2)}.gv");
+        results.Should().BeEquivalentTo(expected);
+    }
+
+    [TestMethod]
+    public void TestIfNest2Return()
+    {
+        string code = @"
+class MyClass
+{
+    public int Method1_2(int a, int b)
+    {
+        if (a > 0)
+        {
+            if (b > 0)
+            {
+                return 3;
+            }
+            else
+            {
+                return 2;
+            }
+        }
+        return 0;
+    }
+}";
+
+        var results = GetCFGsFromSource(code);
+
+        var expected = File.ReadAllText($@"Cfg/Data/{nameof(TestIfNest2Return)}.gv");
+        results.Should().BeEquivalentTo(expected);
+    }
+
+    [TestMethod]
+    public void TestIfNestReturn()
+    {
+        string code = @"
+class MyClass
+{
+    public int Method1_2(int a, int b)
+    {
+        if (a > 0)
+        {
+            if (b > 0)
+            {
+                return 3;
+            }
+            else
+            {
+                return 2;
+            }
+        }
+        else
+        {
+            if (b > 0)
+            {
+                return 1;
+            }
+            else
+            {
+                return 0;
+            }
+        }
+    }
+}";
+
+        var results = GetCFGsFromSource(code);
+
+        var expected = File.ReadAllText($@"Cfg/Data/{nameof(TestIfNestReturn)}.gv");
+        results.Should().BeEquivalentTo(expected);
+    }
+
+    [TestMethod]
     public void TestWhile()
     {
         string code = @"public class MyClass

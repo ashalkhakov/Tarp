@@ -1,0 +1,32 @@
+﻿digraph G
+{
+    n0 [ shape = "box"
+             fontname = "Monospace"
+             label = "<entry>\l" ];
+      n0 -> n4;
+    n1 [ shape = "box"
+             fontname = "Monospace"
+             label = "<exit>\l" ];
+    n2 [ shape = "box"
+             fontname = "Monospace"
+             label = "<n2>\l0:	return 0;\l" ];
+      n2 -> n1;
+    n3 [ shape = "box"
+             fontname = "Monospace"
+             label = "<b > 0>\l" ];
+      n3 -> n5;
+      n3 -> n6;
+    n4 [ shape = "box"
+             fontname = "Monospace"
+             label = "<a > 0>\l" ];
+      n4 -> n3;
+      n4 -> n2;
+    n5 [ shape = "box"
+             fontname = "Monospace"
+             label = "<n5>\l0:	return 3;\l" ];
+      n5 -> n1;
+    n6 [ shape = "box"
+             fontname = "Monospace"
+             label = "<n6>\l0:	return 2;\l" ];
+      n6 -> n1;
+}

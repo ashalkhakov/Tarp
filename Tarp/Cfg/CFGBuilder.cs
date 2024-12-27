@@ -45,9 +45,6 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
 
     public override CFGNode VisitIfStatement(IfStatementSyntax node)
     {
-        // TODO: create subgraphs instead
-        // then plug them into the current graph
-
         if (node.Else == null)
         {
             var ifExit = _currentNode.Successors.FirstOrDefault() ?? _cfg.AddNewNode(CFGNodeKind.Block);
@@ -70,35 +67,7 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
 
             return _currentNode;
         }
-        /*else if (node.Else.Statement is IfStatementSyntax)
-        {
-            var ifExit = _currentNode.Successors.FirstOrDefault() ?? _cfg.AddNewNode(CFGNodeKind.Block);
-            var ifBody = _cfg.AddNewNode(CFGNodeKind.Block);
-            var elseBody = _cfg.AddNewNode(CFGNodeKind.Block);
-
-            if (!_currentNode.ToBranch(node.Condition, ifBody, ifExit))
-            {
-                var newNode = _cfg.AddNewNode(CFGNodeKind.Branch);
-                _currentNode.AddSuccessor(newNode);
-                newNode.ToBranch(node.Condition, ifBody, ifExit);
-            }
-
-            ifBody.AddSuccessor(ifExit);
-            elseBody.AddSuccessor(ifExit);
-
-            _currentNode = ifBody;
-
-            Visit(node.Statement);
-
-            _currentNode = elseBody;
-
-            Visit(node.Else);
-
-            _currentNode = ifExit;
-
-            return _currentNode;
-        }
-        else*/
+        else
         {
             var ifExit = _currentNode.Successors.FirstOrDefault() ?? _cfg.AddNewNode(CFGNodeKind.Block);
             var ifBody = _cfg.AddNewNode(CFGNodeKind.Block);
