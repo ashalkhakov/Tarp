@@ -166,4 +166,15 @@ public class ControlFlowGraph
 
         return label;
     }
+
+    public void DeleteUnreferencedNodes()
+    {
+        nodes.RemoveAll(n => n.Kind != CFGNodeKind.Entry && n.Predecessors.Count == 0);
+
+        for (var i = 0; i < nodes.Count; i++)
+        {
+            var n = nodes[i];
+            n.Id = i;
+        }
+    }
 }

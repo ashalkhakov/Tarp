@@ -30,6 +30,8 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
             _currentNode.AddSuccessor(_cfg.ExitNode);
         }
 
+        _cfg.DeleteUnreferencedNodes();
+
         return _currentNode;
     }
 
