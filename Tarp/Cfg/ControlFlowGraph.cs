@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Microsoft.CodeAnalysis;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -46,7 +47,17 @@ public class ControlFlowGraph
             node.SanityCheck();
         }
 
-        // TODO: check that all labelled nodes are pairwise distinct
+        var labels = new HashSet<string>();
+        foreach (var node in nodes)
+        {
+            var label = node.Kind == CFGNodeKind.Label ? node.Label : null;
+            if (!label.HasValue)
+            {
+                continue;
+            }
+            var labName = label.Value.Text;
+            Debug.Assert(!labels.Contains(labName), $"Labels should be pairwise distinct but {labName} is used at least twice");
+        }
     }
 
     private static string EscapeGraphViz(string s)
