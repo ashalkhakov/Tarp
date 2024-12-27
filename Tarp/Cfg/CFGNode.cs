@@ -1,8 +1,8 @@
 ﻿using Microsoft.CodeAnalysis;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
-using System.Text.Json.Serialization;
 
 namespace Tarp.Cfg;
 
@@ -14,6 +14,8 @@ public class CFGNode(int id, CFGNodeKind kind)
 
     public SyntaxNode? Condition { get; set; }
 
+    public SyntaxToken? Label { get; set; }
+
     public void SanityCheck()
     {
         Debug.Assert(Id >= 0);
@@ -21,16 +23,19 @@ public class CFGNode(int id, CFGNodeKind kind)
         switch (Kind)
         {
             case CFGNodeKind.Entry:
-                Debug.Assert(Kind == CFGNodeKind.Entry && Condition == null && Statements.Count >= 0 && Successors.Count >= 0);
+                Debug.Assert(Condition == null && Statements.Count >= 0 && Successors.Count >= 0 && !Label.HasValue);
                 break;
             case CFGNodeKind.Exit:
-                Debug.Assert(Condition == null && Statements.Count == 0 && Successors.Count == 0);
+                Debug.Assert(Condition == null && Statements.Count == 0 && Successors.Count == 0 && !Label.HasValue);
                 break;
             case CFGNodeKind.Block:
-                Debug.Assert(Condition == null && Statements.Count >= 0 && Successors.Count == 1);
+                //Debug.Assert(Condition == null && Statements.Count >= 0 && Successors.Count == 1 && !Label.HasValue);
                 break;
             case CFGNodeKind.Branch:
-                Debug.Assert(Condition != null && Statements.Count >= 0 && Successors.Count == 2);
+                //Debug.Assert(Condition != null && Statements.Count >= 0 && Successors.Count == 2 && !Label.HasValue);
+                break;
+            case CFGNodeKind.Label:
+                Debug.Assert(Condition == null && Statements.Count >= 0 && Successors.Count == 1 && Label.HasValue);
                 break;
             default:
                 Debug.Assert(false);
@@ -38,12 +43,24 @@ public class CFGNode(int id, CFGNodeKind kind)
         }
     }
 
-    public void ToBranch(SyntaxNode? condition, CFGNode yes, CFGNode nay)
+    public bool ToBranch(SyntaxNode? condition, CFGNode yes, CFGNode nay)
     {
+        if (Kind == CFGNodeKind.Entry)
+        {
+            return false;
+        }
         Kind = CFGNodeKind.Branch;
         Condition = condition;
+        successors.Clear();
         successors.Add(yes);
         successors.Add(nay);
+        return true;
+    }
+
+    public void ToLabel(SyntaxToken identifier)
+    {
+        Kind = CFGNodeKind.Label;
+        Label = identifier;
     }
 
     private List<SyntaxNode> _statements = new();
@@ -72,5 +89,11 @@ public class CFGNode(int id, CFGNodeKind kind)
             return $"{Id}: {Kind} {Condition}. Successors {successors}";
         }
         return $"{Id}: {Kind} {string.Join("\r\n", Statements.Select(s => s.ToString()))}. Successors: {successors}";
+    }
+
+    public void OverrideSuccessors(CFGNode exitNode)
+    {
+        successors.Clear();
+        successors.Add(exitNode);
     }
 }

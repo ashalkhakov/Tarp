@@ -26,10 +26,7 @@
     </Compile>
   </ItemGroup>
   <ItemGroup>
-    <None Update="Cfg\Json\TestIfThenElseAndWhile.gv">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <None Update="Cfg\Json\TestLocalDeclarationsAndSequence.gv">
+    <None Update="Cfg\Data\*.gv">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>

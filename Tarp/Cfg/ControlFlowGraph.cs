@@ -45,6 +45,8 @@ public class ControlFlowGraph
         {
             node.SanityCheck();
         }
+
+        // TODO: check that all labelled nodes are pairwise distinct
     }
 
     private static string EscapeGraphViz(string s)
@@ -145,6 +147,10 @@ public class ControlFlowGraph
         else if (n.Kind == CFGNodeKind.Exit)
         {
             label = "exit";
+        }
+        else if (n.Kind == CFGNodeKind.Label)
+        {
+            label = EscapeGraphViz(n.Label.ToString());
         }
 
         return label;

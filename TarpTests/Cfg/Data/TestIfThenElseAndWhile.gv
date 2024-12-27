@@ -2,14 +2,14 @@ digraph G
 {
     n0 [ shape = "box"
              fontname = "Monospace"
-             label = "<entry>\l0:	bool x = true;\l1:	bool y = false;\l" ];
+             label = "<entry>\l" ];
       n0 -> n2;
     n1 [ shape = "box"
              fontname = "Monospace"
              label = "<exit>\l" ];
     n2 [ shape = "box"
              fontname = "Monospace"
-             label = "<x && !y>\l" ];
+             label = "<x && !y>\l0:	bool x = true;\l1:	bool y = false;\l" ];
       n2 -> n4;
       n2 -> n5;
     n3 [ shape = "box"
@@ -23,7 +23,7 @@ digraph G
       n4 -> n3;
     n5 [ shape = "box"
              fontname = "Monospace"
-             label = "<n5>\l0:	Console.WriteLine(\"Decision made\");\l" ];
+             label = "<n5>\l0:	Console.WriteLine(\"Alternative decision\");\l" ];
       n5 -> n3;
     n6 [ shape = "box"
              fontname = "Monospace"

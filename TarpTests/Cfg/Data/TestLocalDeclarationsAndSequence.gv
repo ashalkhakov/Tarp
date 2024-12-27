@@ -1,0 +1,14 @@
+digraph G
+{
+    n0 [ shape = "box"
+             fontname = "Monospace"
+             label = "<entry>\l" ];
+      n0 -> n2;
+    n1 [ shape = "box"
+             fontname = "Monospace"
+             label = "<exit>\l" ];
+    n2 [ shape = "box"
+             fontname = "Monospace"
+             label = "<n2>\l0:	x += 1;\l1:	var z = 2 * x;\l2:	y = x + 2;\l3:	return x + y + z;\l" ];
+      n2 -> n1;
+}
