@@ -112,8 +112,6 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
         var loopExit = _cfg.AddNewNode(CFGNodeKind.Block);
         var loopBody = _cfg.AddNewNode(CFGNodeKind.Block);
 
-        loopEntry.Kind = CFGNodeKind.Branch;
-
         loopEntry.ToBranch(node.Condition, loopBody, loopExit);
 
         loopBody.AddSuccessor(loopEntry);
@@ -121,6 +119,73 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
         _currentNode = loopBody;
 
         Visit(node.Statement);
+
+        _currentNode = loopExit;
+
+        return _currentNode;
+    }
+
+    public override CFGNode? VisitDoStatement(DoStatementSyntax node)
+    {
+        var loopEntry = _currentNode;
+        var loopExit = _cfg.AddNewNode(CFGNodeKind.Block);
+        var loopBody = _cfg.AddNewNode(CFGNodeKind.Block);
+        var loopCheck = _cfg.AddNewNode(CFGNodeKind.Block);
+
+        loopEntry.AddSuccessor(loopBody);
+        loopBody.AddSuccessor(loopCheck);
+
+        loopCheck.ToBranch(node.Condition, loopBody, loopExit);
+
+        _currentNode = loopBody;
+
+        Visit(node.Statement);
+
+        _currentNode = loopExit;
+
+        return _currentNode;
+    }
+
+    public override CFGNode? VisitForStatement(ForStatementSyntax node)
+    {
+        var loopInit = _currentNode;
+        var loopEntry = _cfg.AddNewNode(CFGNodeKind.Block);
+        var loopExit = _cfg.AddNewNode(CFGNodeKind.Block);
+        var loopBody = _cfg.AddNewNode(CFGNodeKind.Block);
+        var loopIncrement = node.Incrementors.Count == 0 ? null : _cfg.AddNewNode(CFGNodeKind.Block);
+
+        foreach (var init in node.Initializers)
+        {
+            loopInit.AddStatement(init);
+        }
+
+        loopInit.AddSuccessor(loopEntry);
+
+        loopEntry.ToBranch(node.Condition, loopBody, loopExit);
+
+        if (loopIncrement != null)
+        {
+            loopBody.AddSuccessor(loopIncrement);
+            loopIncrement.AddSuccessor(loopEntry);
+        }
+        else
+        {
+            loopBody.AddSuccessor(loopEntry);
+        }
+
+        _currentNode = loopBody;
+
+        Visit(node.Statement);
+
+        if (loopIncrement != null)
+        {
+            _currentNode = loopIncrement;
+
+            foreach (var incrementor in node.Incrementors)
+            {
+                loopIncrement.AddStatement(incrementor);
+            }
+        }
 
         _currentNode = loopExit;
 

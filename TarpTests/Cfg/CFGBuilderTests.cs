@@ -436,6 +436,29 @@ public class MyClass
     }
 
     [TestMethod]
+    public void TestForNoInitializerNoIncrement()
+    {
+        string code = @"class MyClass
+{
+    public int Method4(int c)
+    {
+        int r = 1;
+        for (; c > 0; )
+        {
+            r *= c;
+            c--;
+        }
+        return r;
+    }
+}";
+
+        var results = GetCFGsFromSource(code);
+
+        var expected = File.ReadAllText($@"Cfg/Data/{nameof(TestForNoInitializerNoIncrement)}.gv");
+        results.Should().BeEquivalentTo(expected);
+    }
+
+    [TestMethod]
     public void TestSwitch()
     {
         string code = @"class MyClass
