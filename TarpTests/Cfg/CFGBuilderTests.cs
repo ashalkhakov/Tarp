@@ -340,6 +340,38 @@ class MyClass
     }
 
     [TestMethod]
+    public void TestWhileNested()
+    {
+        string code = @"
+class MyClass
+{
+    public void ShowMatrix(int[, ] matrix)
+    {
+        int rows = matrix.GetLength(0);
+        int cols = matrix.GetLength(1);
+
+        int i = 0;
+        while (i < rows)
+        {
+            int j = 0;
+            while (j < cols)
+            {
+                Console.Write(""{0}\t"", matrix[i, j]);
+                j++;
+            }
+            Console.WriteLine();
+            i++;
+        }
+    }
+}";
+
+        var results = GetCFGsFromSource(code);
+
+        var expected = File.ReadAllText($@"Cfg/Data/{nameof(TestWhileNested)}.gv");
+        results.Should().BeEquivalentTo(expected);
+    }
+
+    [TestMethod]
     public void TestWhileBreak()
     {
         string code = @"public class MyClass
@@ -455,6 +487,34 @@ public class MyClass
         var results = GetCFGsFromSource(code);
 
         var expected = File.ReadAllText($@"Cfg/Data/{nameof(TestForNoInitializerNoIncrement)}.gv");
+        results.Should().BeEquivalentTo(expected);
+    }
+
+    [TestMethod]
+    public void TestForNested()
+    {
+        string code = @"
+class MyClass
+{
+    public void ShowMatrix(int[, ] matrix)
+    {
+        int rows = matrix.GetLength(0);
+        int cols = matrix.GetLength(1);
+
+        for (int i = 0; i < rows; i++)
+        {
+            for (int j = 0; j < cols; j++)
+            {
+                Console.Write(""{0}\t"", matrix[i, j]);
+            }
+            Console.WriteLine();
+        }
+    }
+}";
+
+        var results = GetCFGsFromSource(code);
+
+        var expected = File.ReadAllText($@"Cfg/Data/{nameof(TestForNested)}.gv");
         results.Should().BeEquivalentTo(expected);
     }
 

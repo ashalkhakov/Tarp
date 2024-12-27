@@ -1,0 +1,44 @@
+digraph G
+{
+    n0 [ shape = "box"
+             fontname = "Monospace"
+             label = "<entry>\l" ];
+      n0 -> n2;
+    n1 [ shape = "box"
+             fontname = "Monospace"
+             label = "<exit>\l" ];
+    n2 [ shape = "box"
+             fontname = "Monospace"
+             label = "<n2>\l0:	int rows = matrix.GetLength(0);\l1:	int cols = matrix.GetLength(1);\l2:	int i = 0\l" ];
+      n2 -> n3;
+    n3 [ shape = "box"
+             fontname = "Monospace"
+             label = "<i < rows>\l" ];
+      n3 -> n5;
+      n3 -> n4;
+    n4 [ shape = "box"
+             fontname = "Monospace"
+             label = "<n4>\l" ];
+      n4 -> n1;
+    n5 [ shape = "box"
+             fontname = "Monospace"
+             label = "<n5>\l0:	int j = 0\l" ];
+      n5 -> n7;
+    n6 [ shape = "box"
+             fontname = "Monospace"
+             label = "<n6>\l0:	Console.WriteLine();\l1:	i++\l" ];
+      n6 -> n3;
+    n7 [ shape = "box"
+             fontname = "Monospace"
+             label = "<j < cols>\l" ];
+      n7 -> n8;
+      n7 -> n6;
+    n8 [ shape = "box"
+             fontname = "Monospace"
+             label = "<n8>\l0:	Console.Write(\"{0}\t\", matrix[i, j]);\l" ];
+      n8 -> n9;
+    n9 [ shape = "box"
+             fontname = "Monospace"
+             label = "<n9>\l0:	j++\l" ];
+      n9 -> n7;
+}

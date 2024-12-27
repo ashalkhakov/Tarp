@@ -108,17 +108,19 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
 
     public override CFGNode VisitWhileStatement(WhileStatementSyntax node)
     {
-        var loopEntry = _currentNode;
-        var loopExit = _cfg.AddNewNode(CFGNodeKind.Block);
+        var loopEntry = _cfg.AddNewNode(CFGNodeKind.Block);
+        var loopExit = _currentNode.Successors.FirstOrDefault() ?? _cfg.AddNewNode(CFGNodeKind.Block);
         var loopBody = _cfg.AddNewNode(CFGNodeKind.Block);
 
-        loopEntry.ToBranch(node.Condition, loopBody, loopExit);
+        _currentNode.AddSuccessor(loopEntry);
 
-        loopBody.AddSuccessor(loopEntry);
+        loopEntry.ToBranch(node.Condition, loopBody, loopExit);
 
         _currentNode = loopBody;
 
         Visit(node.Statement);
+
+        _currentNode.AddSuccessor(loopEntry);
 
         _currentNode = loopExit;
 
@@ -128,11 +130,11 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
     public override CFGNode? VisitDoStatement(DoStatementSyntax node)
     {
         var loopEntry = _currentNode;
-        var loopExit = _cfg.AddNewNode(CFGNodeKind.Block);
+        var loopExit = _currentNode.Successors.FirstOrDefault() ?? _cfg.AddNewNode(CFGNodeKind.Block);
         var loopBody = _cfg.AddNewNode(CFGNodeKind.Block);
         var loopCheck = _cfg.AddNewNode(CFGNodeKind.Block);
 
-        loopEntry.AddSuccessor(loopBody);
+        loopEntry.OverrideSuccessors(loopBody);
         loopBody.AddSuccessor(loopCheck);
 
         loopCheck.ToBranch(node.Condition, loopBody, loopExit);
@@ -150,19 +152,24 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
     {
         var loopInit = _currentNode;
         var loopEntry = _cfg.AddNewNode(CFGNodeKind.Block);
-        var loopExit = _cfg.AddNewNode(CFGNodeKind.Block);
+        var loopExit = _currentNode.Successors.FirstOrDefault() ?? _cfg.AddNewNode(CFGNodeKind.Block);
         var loopBody = _cfg.AddNewNode(CFGNodeKind.Block);
         var loopIncrement = node.Incrementors.Count == 0 ? null : _cfg.AddNewNode(CFGNodeKind.Block);
+
+        if (node.Declaration != null)
+        {
+            loopInit.AddStatement(node.Declaration);
+        }
 
         foreach (var init in node.Initializers)
         {
             loopInit.AddStatement(init);
         }
 
-        loopInit.AddSuccessor(loopEntry);
+        loopInit.OverrideSuccessors(loopEntry);
 
         loopEntry.ToBranch(node.Condition, loopBody, loopExit);
-
+        
         if (loopIncrement != null)
         {
             loopBody.AddSuccessor(loopIncrement);
@@ -172,7 +179,7 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
         {
             loopBody.AddSuccessor(loopEntry);
         }
-
+        
         _currentNode = loopBody;
 
         Visit(node.Statement);

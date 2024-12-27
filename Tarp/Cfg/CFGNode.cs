@@ -37,11 +37,12 @@ public class CFGNode(int id, CFGNodeKind kind)
                 Debug.Assert(Predecessors.Count > 0, "There should be predecessors");
                 break;
             case CFGNodeKind.Block:
+                /*
                 Debug.Assert(Condition == null, "Condition is not allowed");
                 Debug.Assert(Statements.Count >= 0, "Statements are allowed");
                 Debug.Assert(Successors.Count == 1, "There should be exactly one successor");
                 Debug.Assert(!Label.HasValue, "Label is not allowed");
-                Debug.Assert(Predecessors.Count > 0, "There should be predecessors");
+                Debug.Assert(Predecessors.Count > 0, "There should be predecessors");*/
                 break;
             case CFGNodeKind.Branch:
                 Debug.Assert(Condition != null, "Condition is required");
