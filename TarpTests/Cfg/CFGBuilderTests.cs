@@ -446,6 +446,36 @@ public class MyClass
     }
 
     [TestMethod]
+    public void TestDoNested()
+    {
+        string code = @"
+class MyClass
+{
+    int Method()
+    {
+        int i, j;
+
+        i = 1;
+        do {
+            j = 1;
+            do {
+                Console.WriteLine(""i = {0}, j = {1}"", i, j);
+                j++;
+            } while (j <= 3);
+            i++;
+        } while (i <= 2);
+
+        return 0;
+    }
+}";
+
+        var results = GetCFGsFromSource(code);
+
+        var expected = File.ReadAllText($@"Cfg/Data/{nameof(TestDoNested)}.gv");
+        results.Should().BeEquivalentTo(expected);
+    }
+
+    [TestMethod]
     public void TestFor()
     {
         string code = @"class MyClass
@@ -515,6 +545,35 @@ class MyClass
         var results = GetCFGsFromSource(code);
 
         var expected = File.ReadAllText($@"Cfg/Data/{nameof(TestForNested)}.gv");
+        results.Should().BeEquivalentTo(expected);
+    }
+
+    [TestMethod]
+    public void TestForNestedReturn()
+    {
+        string code = @"
+class MyClass
+{
+    public void ShowMatrix(int[, ] matrix)
+    {
+        int rows = matrix.GetLength(0);
+        int cols = matrix.GetLength(1);
+
+        for (int i = 0; i < rows; i++)
+        {
+            for (int j = 0; j < cols; j++)
+            {
+                Console.Write(""{0}\t"", matrix[i, j]);
+                return;
+            }
+            Console.WriteLine();
+        }
+    }
+}";
+
+        var results = GetCFGsFromSource(code);
+
+        var expected = File.ReadAllText($@"Cfg/Data/{nameof(TestForNestedReturn)}.gv");
         results.Should().BeEquivalentTo(expected);
     }
 

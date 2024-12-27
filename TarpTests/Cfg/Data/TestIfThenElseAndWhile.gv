@@ -14,8 +14,7 @@ digraph G
       n2 -> n5;
     n3 [ shape = "box"
              fontname = "Monospace"
-             label = "<x>\l" ];
-      n3 -> n7;
+             label = "<n3>\l" ];
       n3 -> n6;
     n4 [ shape = "box"
              fontname = "Monospace"
@@ -27,10 +26,15 @@ digraph G
       n5 -> n3;
     n6 [ shape = "box"
              fontname = "Monospace"
-             label = "<n6>\l" ];
-      n6 -> n1;
+             label = "<x>\l" ];
+      n6 -> n8;
+      n6 -> n7;
     n7 [ shape = "box"
              fontname = "Monospace"
-             label = "<n7>\l0:	Console.WriteLine(\"Looping\");\l1:	x = false;\l" ];
-      n7 -> n3;
+             label = "<n7>\l" ];
+      n7 -> n1;
+    n8 [ shape = "box"
+             fontname = "Monospace"
+             label = "<n8>\l0:	Console.WriteLine(\"Looping\");\l1:	x = false;\l" ];
+      n8 -> n6;
 }
