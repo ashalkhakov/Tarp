@@ -3,6 +3,7 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using System.Collections.Generic;
 using System.Linq;
+using static System.Net.Mime.MediaTypeNames;
 
 
 namespace Tarp.Cfg;
@@ -51,7 +52,8 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
     {
         if (node.Else == null)
         {
-            var ifExit = _currentNode.Successors.FirstOrDefault() ?? _cfg.AddNewNode(CFGNodeKind.Block);
+            var kont = _currentNode.Successors.FirstOrDefault();
+            var ifExit = /*_currentNode.Successors.FirstOrDefault() ??*/ _cfg.AddNewNode(CFGNodeKind.Block);
             var ifBody = _cfg.AddNewNode(CFGNodeKind.Block);
 
             if (!_currentNode.ToBranch(node.Condition, ifBody, ifExit))
@@ -68,12 +70,17 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
             Visit(node.Statement);
 
             _currentNode = ifExit;
+            if (_currentNode.Kind == CFGNodeKind.Block && _currentNode.Successors.Count == 0 && kont != null)
+            {
+                _currentNode.AddSuccessor(kont);
+            }
 
             return _currentNode;
         }
         else
         {
-            var ifExit = _currentNode.Successors.FirstOrDefault() ?? _cfg.AddNewNode(CFGNodeKind.Block);
+            var kont = _currentNode.Successors.FirstOrDefault();
+            var ifExit = /*_currentNode.Successors.FirstOrDefault() ??*/ _cfg.AddNewNode(CFGNodeKind.Block);
             var ifBody = _cfg.AddNewNode(CFGNodeKind.Block);
             var elseBody = _cfg.AddNewNode(CFGNodeKind.Block);
 
@@ -96,6 +103,10 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
             Visit(node.Else);
 
             _currentNode = ifExit;
+            if (_currentNode.Kind == CFGNodeKind.Block && _currentNode.Successors.Count == 0 && kont != null)
+            {
+                _currentNode.AddSuccessor(kont);
+            }
 
             return _currentNode;
         }
@@ -124,7 +135,7 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
         Visit(node.Statement);
 
         _loopContinuations.Pop();
-        if (_currentNode.Kind == CFGNodeKind.Block)
+        if (_currentNode.Kind == CFGNodeKind.Block && _currentNode.Successors.Count == 0)
         {
             _currentNode.AddSuccessor(loopEntry);
         }
@@ -149,7 +160,7 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
 
         Visit(node.Statement);
 
-        if (_currentNode.Kind == CFGNodeKind.Block)
+        if (_currentNode.Kind == CFGNodeKind.Block && _currentNode.Successors.Count == 0)
         {
             _currentNode.AddSuccessor(loopCheck);
         }
@@ -180,8 +191,15 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
 
         loopInit.OverrideSuccessors(loopEntry);
 
-        loopEntry.ToBranch(node.Condition, loopBody, loopExit);
-        
+        if (node.Condition != null)
+        {
+            loopEntry.ToBranch(node.Condition, loopBody, loopExit);
+        }
+        else
+        {
+            loopEntry.ToJump(loopBody);
+        }
+
         if (loopIncrement != null)
         {
             loopBody.AddSuccessor(loopIncrement);
@@ -191,18 +209,31 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
         {
             loopBody.AddSuccessor(loopEntry);
         }
-        
+
         _currentNode = loopBody;
+
+        _loopContinuations.Push((loopExit, loopIncrement));
 
         Visit(node.Statement);
 
+        _loopContinuations.Pop();
+
         if (loopIncrement != null)
         {
-            _currentNode = loopIncrement;
-
             foreach (var incrementor in node.Incrementors)
             {
                 loopIncrement.AddStatement(incrementor);
+            }
+            if (_currentNode.Kind == CFGNodeKind.Block && _currentNode.Successors.Count == 0)
+            {
+                _currentNode.AddSuccessor(loopIncrement);
+            }
+        }
+        else
+        {
+            if (_currentNode.Kind == CFGNodeKind.Block && _currentNode.Successors.Count == 0)
+            {
+                _currentNode.AddSuccessor(loopEntry);
             }
         }
 
@@ -236,35 +267,55 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
     public override CFGNode? VisitBreakStatement(BreakStatementSyntax node)
     {
         var e = _loopContinuations.Peek();
+        /*
+        if (_currentNode.Kind == CFGNodeKind.Block && _currentNode.Successors.FirstOrDefault() == e.BreakNode)
+        {
+            return _currentNode;
+        }
 
         if (!_currentNode.ToJump(e.BreakNode))
         {
-            var jump = _cfg.AddNewNode(CFGNodeKind.Jump);
-
-            _currentNode.OverrideSuccessors(jump);
-
-            jump.ToJump(e.BreakNode);
-            _currentNode = jump;
         }
+        */
+        var jump = _cfg.AddNewNode(CFGNodeKind.Jump);
 
-        return _currentNode;
+        _currentNode.OverrideSuccessors(jump);
+
+        jump.ToJump(e.BreakNode);
+        _currentNode = jump;
+
+        return jump;
     }
 
     public override CFGNode? VisitContinueStatement(ContinueStatementSyntax node)
     {
         var e = _loopContinuations.Peek();
 
+        // split the current block, add a new block that jumps into the continue destination
+        // current block must end
+        /*
+        if (_currentNode.Kind == CFGNodeKind.Block && _currentNode.Successors.FirstOrDefault() == e.ContinueNode)
+        {
+            return _currentNode;
+        }
+        */
+        var jump = _cfg.AddNewNode(CFGNodeKind.Jump);
+
+        _currentNode.OverrideSuccessors(jump);
+
+        jump.ToJump(e.ContinueNode);
+        _currentNode = jump;
+
+        return jump;
+        /*
         if (!_currentNode.ToJump(e.ContinueNode))
         {
-            var jump = _cfg.AddNewNode(CFGNodeKind.Jump);
 
             _currentNode.OverrideSuccessors(jump);
 
             jump.ToJump(e.ContinueNode);
-            _currentNode = jump;
         }
-
-        return _currentNode;
+        */
     }
 
     public override CFGNode VisitExpressionStatement(ExpressionStatementSyntax node)
@@ -348,6 +399,14 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
             return (true, null);
         }
         if (statement is ReturnStatementSyntax)
+        {
+            return (true, null);
+        }
+        if (statement is BreakStatementSyntax)
+        {
+            return (true, null);
+        }
+        if (statement is ContinueStatementSyntax)
         {
             return (true, null);
         }

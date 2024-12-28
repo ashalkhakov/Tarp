@@ -23,14 +23,18 @@ digraph G
     n5 [ shape = "box"
              fontname = "Monospace"
              label = "<a < 0>\l" ];
-      n5 -> n6;
       n5 -> n7;
+      n5 -> n8;
     n6 [ shape = "box"
              fontname = "Monospace"
-             label = "<n6>\l0:	r = -1;\l" ];
+             label = "<n6>\l" ];
       n6 -> n3;
     n7 [ shape = "box"
              fontname = "Monospace"
-             label = "<n7>\l0:	r = 0;\l" ];
-      n7 -> n3;
+             label = "<n7>\l0:	r = -1;\l" ];
+      n7 -> n6;
+    n8 [ shape = "box"
+             fontname = "Monospace"
+             label = "<n8>\l0:	r = 0;\l" ];
+      n8 -> n6;
 }

@@ -152,6 +152,10 @@ public class CFGNode(int id, CFGNodeKind kind)
 
     public void OverrideSuccessors(CFGNode exitNode)
     {
+        if (Kind == CFGNodeKind.Branch)
+        {
+            throw new Exception("Cannot override succesors of conditional branch");
+        }
         foreach (var n in successors)
         {
             n.predecessors.Remove(this);

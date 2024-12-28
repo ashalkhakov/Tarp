@@ -551,6 +551,59 @@ class MyClass
     }
 
     [TestMethod]
+    public void TestForBreak()
+    {
+        string code = @"class MyClass
+{
+    public int Method4(int c)
+    {
+        int r;
+        for (r = 1; ; c--)
+        {
+            if (c <= 0)
+            {
+                break;
+            }
+            r *= c;
+        }
+        return r;
+    }
+}";
+
+        var results = GetCFGsFromSource(code);
+
+        var expected = File.ReadAllText($@"Cfg/Data/{nameof(TestForBreak)}.gv");
+        results.Should().BeEquivalentTo(expected);
+    }
+
+    [TestMethod]
+    public void TestForContinue()
+    {
+        string code = @"class MyClass
+{
+    public int Method4(int c)
+    {
+        int r;
+        for (r = 1; ; c--)
+        {
+            if (c > 0)
+            {
+                r *= c;
+                continue;
+            }
+            break;
+        }
+        return r;
+    }
+}";
+
+        var results = GetCFGsFromSource(code);
+
+        var expected = File.ReadAllText($@"Cfg/Data/{nameof(TestForContinue)}.gv");
+        results.Should().BeEquivalentTo(expected);
+    }
+
+    [TestMethod]
     public void TestForNoInitializerNoIncrement()
     {
         string code = @"class MyClass

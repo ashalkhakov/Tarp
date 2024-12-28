@@ -18,10 +18,6 @@ public class ControlFlowGraph
         ExitNode = AddNewNode(CFGNodeKind.Exit);
     }
 
-    public int EntryId { get => EntryNode.Id; }
-
-    public int ExitId { get => ExitNode.Id; }
-
     public CFGNode EntryNode { get; private set; }
 
     public CFGNode ExitNode { get; private set; }
@@ -34,6 +30,34 @@ public class ControlFlowGraph
         var node = new CFGNode(id, kind);
         nodes.Add(node);
         return node;
+    }
+
+    public void Merge(ControlFlowGraph other, CFGNode newEntry, CFGNode newExit)
+    {
+        var idMap = new Dictionary<int, int>();
+
+        foreach (var node in other.nodes)
+        {
+            var newNode = node.Kind == CFGNodeKind.Entry ? newEntry :
+                node.Kind == CFGNodeKind.Exit ? newExit :
+                AddNewNode(node.Kind);
+
+            idMap[node.Id] = newNode.Id;
+        }
+
+        foreach (var node in other.nodes)
+        {
+            var newNodeId = idMap[node.Id];
+            var newNode = nodes[newNodeId];
+
+            foreach (var succ in node.Successors)
+            {
+                var newSuccId = idMap[succ.Id];
+                var newSucc = nodes[newSuccId];
+
+                newNode.AddSuccessor(newSucc);
+            }
+        }
     }
 
     public void SanityCheck()
