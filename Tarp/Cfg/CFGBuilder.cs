@@ -1,6 +1,7 @@
 ﻿using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using System.Collections.Generic;
 using System.Linq;
 
 
@@ -10,6 +11,7 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
 {
     private readonly ControlFlowGraph _cfg = new ControlFlowGraph();
     private CFGNode _currentNode;
+    private Stack<(CFGNode BreakNode, CFGNode ContinueNode)> _loopContinuations = new();
 
     public ControlFlowGraph Build(SyntaxNode root)
     {
@@ -117,10 +119,15 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
         loopEntry.ToBranch(node.Condition, loopBody, loopExit);
 
         _currentNode = loopBody;
+        _loopContinuations.Push((loopExit, loopEntry));
 
         Visit(node.Statement);
 
-        _currentNode.AddSuccessor(loopEntry);
+        _loopContinuations.Pop();
+        if (_currentNode.Kind == CFGNodeKind.Block)
+        {
+            _currentNode.AddSuccessor(loopEntry);
+        }
 
         _currentNode = loopExit;
 
@@ -135,14 +142,19 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
         var loopCheck = _cfg.AddNewNode(CFGNodeKind.Block);
 
         loopEntry.OverrideSuccessors(loopBody);
-        loopBody.AddSuccessor(loopCheck);
-
         loopCheck.ToBranch(node.Condition, loopBody, loopExit);
 
         _currentNode = loopBody;
+        _loopContinuations.Push((loopExit, loopCheck));
 
         Visit(node.Statement);
 
+        if (_currentNode.Kind == CFGNodeKind.Block)
+        {
+            _currentNode.AddSuccessor(loopCheck);
+        }
+
+        _loopContinuations.Pop();
         _currentNode = loopExit;
 
         return _currentNode;
@@ -219,6 +231,40 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
     public override CFGNode? VisitGotoStatement(GotoStatementSyntax node)
     {
         throw new System.NotImplementedException("goto not implemented yet");
+    }
+
+    public override CFGNode? VisitBreakStatement(BreakStatementSyntax node)
+    {
+        var e = _loopContinuations.Peek();
+
+        if (!_currentNode.ToJump(e.BreakNode))
+        {
+            var jump = _cfg.AddNewNode(CFGNodeKind.Jump);
+
+            _currentNode.OverrideSuccessors(jump);
+
+            jump.ToJump(e.BreakNode);
+            _currentNode = jump;
+        }
+
+        return _currentNode;
+    }
+
+    public override CFGNode? VisitContinueStatement(ContinueStatementSyntax node)
+    {
+        var e = _loopContinuations.Peek();
+
+        if (!_currentNode.ToJump(e.ContinueNode))
+        {
+            var jump = _cfg.AddNewNode(CFGNodeKind.Jump);
+
+            _currentNode.OverrideSuccessors(jump);
+
+            jump.ToJump(e.ContinueNode);
+            _currentNode = jump;
+        }
+
+        return _currentNode;
     }
 
     public override CFGNode VisitExpressionStatement(ExpressionStatementSyntax node)

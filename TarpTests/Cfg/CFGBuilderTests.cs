@@ -382,7 +382,9 @@ class MyClass
         while (true)
         {
             if (i > a)
+            {
                 break;
+            }
             i++;
         }
     }
@@ -442,6 +444,57 @@ public class MyClass
         var results = GetCFGsFromSource(code);
 
         var expected = File.ReadAllText($@"Cfg/Data/{nameof(TestDo)}.gv");
+        results.Should().BeEquivalentTo(expected);
+    }
+
+    [TestMethod]
+    public void TestDoBreak()
+    {
+        string code = @"public class MyClass
+{
+    public void Method2_1(int a)
+    {
+        var i = 0;
+        do
+        {
+            if (i > a)
+            {
+                break;
+            }
+            i++;
+        } while (true);
+    }
+}";
+
+        var results = GetCFGsFromSource(code);
+
+        var expected = File.ReadAllText($@"Cfg/Data/{nameof(TestDoBreak)}.gv");
+        results.Should().BeEquivalentTo(expected);
+    }
+
+    [TestMethod]
+    public void TestDoContinue()
+    {
+        string code = @"public class MyClass
+{
+    public void Method2_1(int a)
+    {
+        var i = 0;
+        do
+        {
+            if (i <= a)
+            {
+                i++;
+                continue;
+            }
+            break;
+        } while (true);
+    }
+}";
+
+        var results = GetCFGsFromSource(code);
+
+        var expected = File.ReadAllText($@"Cfg/Data/{nameof(TestDoContinue)}.gv");
         results.Should().BeEquivalentTo(expected);
     }
 

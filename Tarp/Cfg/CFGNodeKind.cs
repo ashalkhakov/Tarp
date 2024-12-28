@@ -16,5 +16,7 @@ public enum CFGNodeKind
     [EnumMember(Value = "branch")]
     Branch,
     [EnumMember(Value = "label")]
-    Label
+    Label,
+    [EnumMember(Value = "jump")]
+    Jump
 }

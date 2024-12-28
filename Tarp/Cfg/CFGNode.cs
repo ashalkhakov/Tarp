@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using static System.Runtime.InteropServices.JavaScript.JSType;
 
 namespace Tarp.Cfg;
 
@@ -37,12 +38,11 @@ public class CFGNode(int id, CFGNodeKind kind)
                 Debug.Assert(Predecessors.Count > 0, "There should be predecessors");
                 break;
             case CFGNodeKind.Block:
-                /*
                 Debug.Assert(Condition == null, "Condition is not allowed");
                 Debug.Assert(Statements.Count >= 0, "Statements are allowed");
                 Debug.Assert(Successors.Count == 1, "There should be exactly one successor");
                 Debug.Assert(!Label.HasValue, "Label is not allowed");
-                Debug.Assert(Predecessors.Count > 0, "There should be predecessors");*/
+                Debug.Assert(Predecessors.Count > 0, "There should be predecessors");
                 break;
             case CFGNodeKind.Branch:
                 Debug.Assert(Condition != null, "Condition is required");
@@ -56,6 +56,13 @@ public class CFGNode(int id, CFGNodeKind kind)
                 Debug.Assert(Statements.Count >= 0, "Statements are allowed");
                 Debug.Assert(Successors.Count == 1, "There should be exactly one successor");
                 Debug.Assert(Label.HasValue, "Label is required");
+                Debug.Assert(Predecessors.Count > 0, "There should be predecessors");
+                break;
+            case CFGNodeKind.Jump:
+                Debug.Assert(Condition == null, "Condition is not allowed");
+                Debug.Assert(Statements.Count >= 0, "Statements are allowed");
+                Debug.Assert(Successors.Count == 1, "There should be exactly one successor");
+                Debug.Assert(!Label.HasValue, "Label is not allowed");
                 Debug.Assert(Predecessors.Count > 0, "There should be predecessors");
                 break;
             default:
@@ -86,6 +93,20 @@ public class CFGNode(int id, CFGNodeKind kind)
         successors.Clear();
         AddSuccessor(yes);
         AddSuccessor(nay);
+
+        return true;
+    }
+
+    public bool ToJump(CFGNode succ)
+    {
+        if (Kind == CFGNodeKind.Entry)
+        {
+            return false;
+        }
+        Kind = CFGNodeKind.Jump;
+        Condition = null;
+
+        OverrideSuccessors(succ);
 
         return true;
     }

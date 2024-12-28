@@ -18,19 +18,23 @@ digraph G
     n4 [ shape = "box"
              fontname = "Monospace"
              label = "<n4>\l0:	j = 1;\l" ];
-      n4 -> n6;
+      n4 -> n7;
     n5 [ shape = "box"
              fontname = "Monospace"
-             label = "<i <= 2>\l0:	i++;\l" ];
+             label = "<i <= 2>\l" ];
       n5 -> n4;
       n5 -> n3;
     n6 [ shape = "box"
              fontname = "Monospace"
-             label = "<n6>\l0:	Console.WriteLine(\"i = {0}, j = {1}\", i, j);\l1:	j++;\l" ];
-      n6 -> n7;
+             label = "<n6>\l0:	i++;\l" ];
+      n6 -> n5;
     n7 [ shape = "box"
              fontname = "Monospace"
+             label = "<n7>\l0:	Console.WriteLine(\"i = {0}, j = {1}\", i, j);\l1:	j++;\l" ];
+      n7 -> n8;
+    n8 [ shape = "box"
+             fontname = "Monospace"
              label = "<j <= 3>\l" ];
-      n7 -> n6;
-      n7 -> n5;
+      n8 -> n7;
+      n8 -> n6;
 }
