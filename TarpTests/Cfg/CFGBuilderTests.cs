@@ -741,6 +741,41 @@ class MyClass
         results.Should().BeEquivalentTo(expected);
     }
 
+    [TestMethod]
+    public void TestBinarySearch()
+    {
+        string code = @"
+class MyClass
+{
+    int BinarySearch(int[] arr, int left, int right, int key)
+    {
+        while (left <= right)
+        {
+            var mid = left + (right - left) / 2;
+
+            if (arr[mid] == key)
+            {
+                return mid;
+            }
+            else if (arr[mid] < key)
+            {
+                left = mid + 1;
+            }
+            else
+            {
+                right = mid - 1;
+            }
+        }
+
+        return -1;
+    }
+}";
+        var results = GetCFGsFromSource(code);
+
+        var expected = File.ReadAllText($@"Cfg/Data/{nameof(TestBinarySearch)}.gv");
+        results.Should().BeEquivalentTo(expected);
+    }
+
     List<string> GetCFGsFromSource(string code)
     {
         // Parse the code
