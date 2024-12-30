@@ -13,6 +13,7 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
     private readonly ControlFlowGraph _cfg = new ControlFlowGraph();
     private CFGNode _currentNode;
     private Stack<(CFGNode BreakNode, CFGNode ContinueNode)> _loopContinuations = new();
+    private Dictionary<string, CFGNode> _labelledBlocks = new();
 
     public ControlFlowGraph Build(SyntaxNode root)
     {
@@ -25,6 +26,15 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
 
     public override CFGNode VisitMethodDeclaration(MethodDeclarationSyntax node)
     {
+        // prepare a block for each labelled statement
+        foreach (var statement in node.Body.DescendantNodes().OfType<LabeledStatementSyntax>())
+        {
+            var identifier = statement.Identifier;
+            var block = _cfg.AddNewNode(CFGNodeKind.Label);
+
+            _labelledBlocks.Add((string)identifier.Value, block);
+        }
+
         // Visit method body
         Visit(node.Body);
 
@@ -242,14 +252,33 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
         return _currentNode;
     }
 
+    public override CFGNode? VisitForEachStatement(ForEachStatementSyntax node)
+    {
+        // foreach (var r in E) { ... }
+        // - kinda like a while... but it tests E's condition every time
+
+        return base.VisitForEachStatement(node);
+    }
+
     public override CFGNode? VisitLabeledStatement(LabeledStatementSyntax node)
     {
-        var labelEntry = _cfg.AddNewNode(CFGNodeKind.Label);
-
         var identifier = node.Identifier;
         var statement = node.Statement;
 
-        _currentNode.AddSuccessor(labelEntry);
+        if (!_labelledBlocks.TryGetValue((string)identifier.Value, out var labelEntry))
+        {
+            throw new System.Exception("Labeled statement has no block prepared for it");
+        }
+
+        if (labelEntry.Kind != CFGNodeKind.Label || labelEntry.Successors.Count > 0)
+        {
+            throw new System.Exception("Block for labeled statement has already been processed");
+        }
+
+        //if (_currentNode.Kind == CFGNodeKind.Block && _currentNode.Successors.Count == 0)
+        {
+            _currentNode.OverrideSuccessors(labelEntry);
+        }
 
         labelEntry.ToLabel(identifier);
 
@@ -261,22 +290,31 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
 
     public override CFGNode? VisitGotoStatement(GotoStatementSyntax node)
     {
-        throw new System.NotImplementedException("goto not implemented yet");
+        if (node.CaseOrDefaultKeyword.Value != null)
+        {
+            throw new System.NotImplementedException("goto case / default not implemented yet");
+        }
+
+        var label = (node.Expression as IdentifierNameSyntax).Identifier;
+
+        if (!_labelledBlocks.TryGetValue((string)label.Value, out var dest))
+        {
+            throw new System.Exception($"Label is not declared {label.Value}");
+        }
+
+        var jump = _cfg.AddNewNode(CFGNodeKind.Jump);
+
+        _currentNode.OverrideSuccessors(jump);
+
+        jump.ToJump(dest);
+        _currentNode = jump;
+
+        return jump;
     }
 
     public override CFGNode? VisitBreakStatement(BreakStatementSyntax node)
     {
         var e = _loopContinuations.Peek();
-        /*
-        if (_currentNode.Kind == CFGNodeKind.Block && _currentNode.Successors.FirstOrDefault() == e.BreakNode)
-        {
-            return _currentNode;
-        }
-
-        if (!_currentNode.ToJump(e.BreakNode))
-        {
-        }
-        */
         var jump = _cfg.AddNewNode(CFGNodeKind.Jump);
 
         _currentNode.OverrideSuccessors(jump);
@@ -290,15 +328,6 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
     public override CFGNode? VisitContinueStatement(ContinueStatementSyntax node)
     {
         var e = _loopContinuations.Peek();
-
-        // split the current block, add a new block that jumps into the continue destination
-        // current block must end
-        /*
-        if (_currentNode.Kind == CFGNodeKind.Block && _currentNode.Successors.FirstOrDefault() == e.ContinueNode)
-        {
-            return _currentNode;
-        }
-        */
         var jump = _cfg.AddNewNode(CFGNodeKind.Jump);
 
         _currentNode.OverrideSuccessors(jump);
@@ -307,15 +336,6 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
         _currentNode = jump;
 
         return jump;
-        /*
-        if (!_currentNode.ToJump(e.ContinueNode))
-        {
-
-            _currentNode.OverrideSuccessors(jump);
-
-            jump.ToJump(e.ContinueNode);
-        }
-        */
     }
 
     public override CFGNode VisitExpressionStatement(ExpressionStatementSyntax node)
@@ -337,8 +357,6 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
 
         return _currentNode;
     }
-
-    // Implement other statement visitors (e.g., for, foreach, switch, etc.) similarly
 
     public void AddSyntaxNode(StatementSyntax node)
     {

@@ -3,7 +3,6 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
-using static System.Runtime.InteropServices.JavaScript.JSType;
 
 namespace Tarp.Cfg;
 
@@ -21,47 +20,49 @@ public class CFGNode(int id, CFGNodeKind kind)
     {
         Debug.Assert(Id >= 0);
 
+        Debug.Assert(Successors.Count <= MaxAllowedSuccessors(Kind), "Too many successors");
+
         switch (Kind)
         {
             case CFGNodeKind.Entry:
                 Debug.Assert(Condition == null, "Condition is not allowed");
                 Debug.Assert(Statements.Count >= 0, "Statements are allowed");
-                Debug.Assert(Successors.Count > 0, "There should be successors");
+                //Debug.Assert(Successors.Count > 0, "There should be successors");
                 Debug.Assert(!Label.HasValue, "Label is not allowed");
                 Debug.Assert(Predecessors.Count == 0, "There should be no predecessors");
                 break;
             case CFGNodeKind.Exit:
                 Debug.Assert(Condition == null, "Condition is not allowed");
                 Debug.Assert(Statements.Count == 0, "Statements are not allowed");
-                Debug.Assert(Successors.Count == 0, "there should be no successors");
+                //Debug.Assert(Successors.Count == 0, "there should be no successors");
                 Debug.Assert(!Label.HasValue, "Label is not allowed");
                 Debug.Assert(Predecessors.Count > 0, "There should be predecessors");
                 break;
             case CFGNodeKind.Block:
                 Debug.Assert(Condition == null, "Condition is not allowed");
                 Debug.Assert(Statements.Count >= 0, "Statements are allowed");
-                Debug.Assert(Successors.Count == 1, "There should be exactly one successor");
+                //Debug.Assert(Successors.Count == 1, "There should be exactly one successor");
                 Debug.Assert(!Label.HasValue, "Label is not allowed");
                 Debug.Assert(Predecessors.Count > 0, "There should be predecessors");
                 break;
             case CFGNodeKind.Branch:
                 Debug.Assert(Condition != null, "Condition is required");
                 Debug.Assert(Statements.Count >= 0, "Statements are allowed");
-                Debug.Assert(Successors.Count == 2, "There should be exactly two successors");
+                //Debug.Assert(Successors.Count == 2, "There should be exactly two successors");
                 Debug.Assert(!Label.HasValue, "Label is not allowed");
                 Debug.Assert(Predecessors.Count > 0, "There should be predecessors");
                 break;
             case CFGNodeKind.Label:
                 Debug.Assert(Condition == null, "Condition is not allowed");
                 Debug.Assert(Statements.Count >= 0, "Statements are allowed");
-                Debug.Assert(Successors.Count == 1, "There should be exactly one successor");
+                //Debug.Assert(Successors.Count == 1, "There should be exactly one successor");
                 Debug.Assert(Label.HasValue, "Label is required");
                 Debug.Assert(Predecessors.Count > 0, "There should be predecessors");
                 break;
             case CFGNodeKind.Jump:
                 Debug.Assert(Condition == null, "Condition is not allowed");
                 Debug.Assert(Statements.Count >= 0, "Statements are allowed");
-                Debug.Assert(Successors.Count == 1, "There should be exactly one successor");
+                //Debug.Assert(Successors.Count == 1, "There should be exactly one successor");
                 Debug.Assert(!Label.HasValue, "Label is not allowed");
                 Debug.Assert(Predecessors.Count > 0, "There should be predecessors");
                 break;
@@ -79,12 +80,13 @@ public class CFGNode(int id, CFGNodeKind kind)
 
     public bool ToBranch(SyntaxNode? condition, CFGNode yes, CFGNode nay)
     {
-        if (Kind == CFGNodeKind.Entry)
+        if (Kind == CFGNodeKind.Entry || Kind == CFGNodeKind.Label)
         {
             return false;
         }
         Kind = CFGNodeKind.Branch;
         Condition = condition;
+        Label = null;
 
         foreach (var n in successors)
         {
@@ -105,6 +107,7 @@ public class CFGNode(int id, CFGNodeKind kind)
         }
         Kind = CFGNodeKind.Jump;
         Condition = null;
+        Label = null;
 
         OverrideSuccessors(succ);
 
@@ -113,6 +116,10 @@ public class CFGNode(int id, CFGNodeKind kind)
 
     public void ToLabel(SyntaxToken identifier)
     {
+        if (Kind == CFGNodeKind.Branch)
+        {
+
+        }
         Kind = CFGNodeKind.Label;
         Label = identifier;
     }
@@ -131,8 +138,24 @@ public class CFGNode(int id, CFGNodeKind kind)
 
     public void AddSuccessor(CFGNode node)
     {
+        int maxSuccessors = MaxAllowedSuccessors(node.Kind);
+        if (successors.Count > maxSuccessors)
+        {
+            throw new Exception("Cannot add a successor");
+        }
         successors.Add(node);
         node.predecessors.Add(this);
+    }
+
+    private static int MaxAllowedSuccessors(CFGNodeKind kind)
+    {
+        return kind == CFGNodeKind.Entry ? 1 :
+            kind == CFGNodeKind.Exit ? 0 :
+            kind == CFGNodeKind.Block ? 1 :
+            kind == CFGNodeKind.Branch ? 2 :
+            kind == CFGNodeKind.Label ? 1 :
+            kind == CFGNodeKind.Jump ? 1 :
+            0;
     }
 
     public void AddStatement(SyntaxNode node)

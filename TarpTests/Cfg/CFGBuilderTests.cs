@@ -684,6 +684,29 @@ class MyClass
     }
 
     [TestMethod]
+    public void TestForEach()
+    {
+        string code = @"class MyClass
+{
+    public int Method4()
+    {
+        var c = 0;
+        foreach (var r in new[] { 1, 2, 3, 4, 5 })
+        {
+            c += r;
+        }
+        return c;
+    }
+}";
+
+        var results = GetCFGsFromSource(code);
+
+        var expected = File.ReadAllText($@"Cfg/Data/{nameof(TestFor)}.gv");
+        results.Should().BeEquivalentTo(expected);
+    }
+
+
+    [TestMethod]
     public void TestSwitch()
     {
         string code = @"class MyClass
@@ -775,6 +798,67 @@ class MyClass
         var expected = File.ReadAllText($@"Cfg/Data/{nameof(TestBinarySearch)}.gv");
         results.Should().BeEquivalentTo(expected);
     }
+
+    [TestMethod]
+    public void TestGoto()
+    {
+        string code = @"
+class MyClass
+{
+    int F(int x)
+    {
+        int c = 0;
+
+        Lstart:
+
+        Console.WriteLine(c);
+
+        c++;
+
+        if (c < x)
+        {
+            goto Lstart;
+        }
+    }
+}";
+        var results = GetCFGsFromSource(code);
+
+        var expected = File.ReadAllText($@"Cfg/Data/{nameof(TestGoto)}.gv");
+        results.Should().BeEquivalentTo(expected);
+    }
+
+    [TestMethod]
+    public void TestGotoForward()
+    {
+        string code = @"
+class MyClass
+{
+    int F(int x)
+    {
+        int c = 0;
+        IEnumerator<int> tmp;
+        tmp = Enumerable.Range(0, x).GetEnumerator();
+
+        goto IL_001a;
+        IL_000f:
+        c += tmp.Current;
+        IL_001a:
+        if (tmp.MoveNext())
+        {
+            goto IL_000f;
+        }
+        goto IL_002e;
+
+        IL_002e:
+        return c;
+    }
+}";
+        var results = GetCFGsFromSource(code);
+
+        var expected = File.ReadAllText($@"Cfg/Data/{nameof(TestGotoForward)}.gv");
+        results.Should().BeEquivalentTo(expected);
+    }
+
 
     List<string> GetCFGsFromSource(string code)
     {
