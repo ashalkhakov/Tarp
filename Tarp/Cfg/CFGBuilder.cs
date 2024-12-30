@@ -275,9 +275,10 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
             throw new System.Exception("Block for labeled statement has already been processed");
         }
 
-        //if (_currentNode.Kind == CFGNodeKind.Block && _currentNode.Successors.Count == 0)
+        // don't override the successors (it could be a e.g. return statement)
+        if (_currentNode.Successors.Count == 0)
         {
-            _currentNode.OverrideSuccessors(labelEntry);
+            _currentNode.AddSuccessor(labelEntry);
         }
 
         labelEntry.ToLabel(identifier);

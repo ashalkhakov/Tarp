@@ -26,7 +26,7 @@ digraph G
     n6 [ shape = "box"
              fontname = "Monospace"
              label = "<n6>\l" ];
-      n6 -> n2;
+      n6 -> n3;
     n7 [ shape = "box"
              fontname = "Monospace"
              label = "<n7>\l" ];

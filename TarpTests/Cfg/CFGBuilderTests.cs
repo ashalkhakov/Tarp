@@ -859,6 +859,40 @@ class MyClass
         results.Should().BeEquivalentTo(expected);
     }
 
+    [TestMethod]
+    public void TestGotoBreakOutOfNestedFors()
+    {
+        string code = @"
+class MyClass
+{
+    void Method(int[,] matrix, int x)
+    {
+        int i, j;
+
+        for (i = 0; i < matrix.GetLength(0); i++)
+        {
+            for (j = 0; j < matrix.GetLength(1); j++)
+            {
+                if (matrix[i,j] == x)
+                {
+                    goto end;
+                }
+            }
+        }
+
+        Console.WriteLine(""{0} not found"", x);
+        return;
+        
+        end:
+        Console.WriteLine(""{0} located at {1}, {2}"", x, i, j);
+    }
+}";
+
+        var results = GetCFGsFromSource(code);
+
+        var expected = File.ReadAllText($@"Cfg/Data/{nameof(TestGotoBreakOutOfNestedFors)}.gv");
+        results.Should().BeEquivalentTo(expected);
+    }
 
     List<string> GetCFGsFromSource(string code)
     {
