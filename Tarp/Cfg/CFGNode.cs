@@ -16,6 +16,8 @@ public class CFGNode(int id, CFGNodeKind kind)
 
     public SyntaxToken? Label { get; set; }
 
+    public CFGRegion Region { get; set; }
+
     public void SanityCheck()
     {
         Debug.Assert(Id >= 0);
@@ -27,42 +29,42 @@ public class CFGNode(int id, CFGNodeKind kind)
             case CFGNodeKind.Entry:
                 Debug.Assert(Condition == null, "Condition is not allowed");
                 Debug.Assert(Statements.Count >= 0, "Statements are allowed");
-                //Debug.Assert(Successors.Count > 0, "There should be successors");
+                Debug.Assert(Successors.Count > 0, "There should be successors");
                 Debug.Assert(!Label.HasValue, "Label is not allowed");
                 Debug.Assert(Predecessors.Count == 0, "There should be no predecessors");
                 break;
             case CFGNodeKind.Exit:
                 Debug.Assert(Condition == null, "Condition is not allowed");
                 Debug.Assert(Statements.Count == 0, "Statements are not allowed");
-                //Debug.Assert(Successors.Count == 0, "there should be no successors");
+                Debug.Assert(Successors.Count == 0, "there should be no successors");
                 Debug.Assert(!Label.HasValue, "Label is not allowed");
                 Debug.Assert(Predecessors.Count > 0, "There should be predecessors");
                 break;
             case CFGNodeKind.Block:
                 Debug.Assert(Condition == null, "Condition is not allowed");
                 Debug.Assert(Statements.Count >= 0, "Statements are allowed");
-                //Debug.Assert(Successors.Count == 1, "There should be exactly one successor");
+                Debug.Assert(Successors.Count == 1, "There should be exactly one successor");
                 Debug.Assert(!Label.HasValue, "Label is not allowed");
                 Debug.Assert(Predecessors.Count > 0, "There should be predecessors");
                 break;
             case CFGNodeKind.Branch:
                 Debug.Assert(Condition != null, "Condition is required");
                 Debug.Assert(Statements.Count >= 0, "Statements are allowed");
-                //Debug.Assert(Successors.Count == 2, "There should be exactly two successors");
+                Debug.Assert(Successors.Count == 2, "There should be exactly two successors");
                 Debug.Assert(!Label.HasValue, "Label is not allowed");
                 Debug.Assert(Predecessors.Count > 0, "There should be predecessors");
                 break;
             case CFGNodeKind.Label:
                 Debug.Assert(Condition == null, "Condition is not allowed");
                 Debug.Assert(Statements.Count >= 0, "Statements are allowed");
-                //Debug.Assert(Successors.Count == 1, "There should be exactly one successor");
+                Debug.Assert(Successors.Count == 1, "There should be exactly one successor");
                 Debug.Assert(Label.HasValue, "Label is required");
                 Debug.Assert(Predecessors.Count > 0, "There should be predecessors");
                 break;
             case CFGNodeKind.Jump:
                 Debug.Assert(Condition == null, "Condition is not allowed");
                 Debug.Assert(Statements.Count >= 0, "Statements are allowed");
-                //Debug.Assert(Successors.Count == 1, "There should be exactly one successor");
+                Debug.Assert(Successors.Count == 1, "There should be exactly one successor");
                 Debug.Assert(!Label.HasValue, "Label is not allowed");
                 Debug.Assert(Predecessors.Count > 0, "There should be predecessors");
                 break;

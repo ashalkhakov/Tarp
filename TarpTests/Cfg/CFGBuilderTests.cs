@@ -894,6 +894,120 @@ class MyClass
         results.Should().BeEquivalentTo(expected);
     }
 
+    [TestMethod]
+    public void TestThrow()
+    {
+        string code = @"
+class MyClass
+{
+    int Method(int x)
+    {
+        if (x <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(x), ""Input must be positive."");
+        }
+
+        return 2 * x;
+    }
+}";
+
+        var results = GetCFGsFromSource(code);
+
+        var expected = File.ReadAllText($@"Cfg/Data/{nameof(TestThrow)}.gv");
+        results.Should().BeEquivalentTo(expected);
+    }
+
+    [TestMethod]
+    public void TestTryFinally()
+    {
+        string code = @"
+class MyClass
+{
+    bool busy;
+    int x;
+
+    void Method()
+    {
+        busy = true;
+
+        try
+        {
+            x++;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}";
+
+        var results = GetCFGsFromSource(code);
+
+        var expected = File.ReadAllText($@"Cfg/Data/{nameof(TestTryFinally)}.gv");
+        results.Should().BeEquivalentTo(expected);
+    }
+
+    [TestMethod]
+    public void TestTryCatch()
+    {
+        string code = @"
+class MyClass
+{
+    int x;
+
+    void Method()
+    {
+        try
+        {
+            x++;
+        }
+        catch (Exception e)
+        {
+            throw;
+        }
+    }
+}";
+
+        var results = GetCFGsFromSource(code);
+
+        var expected = File.ReadAllText($@"Cfg/Data/{nameof(TestTryCatch)}.gv");
+        results.Should().BeEquivalentTo(expected);
+    }
+
+    [TestMethod]
+    public void TestTryCatchFinally()
+    {
+        string code = @"
+class MyClass
+{
+    bool busy;
+    int x;
+
+    void Method()
+    {
+        busy = true;
+
+        try
+        {
+            x++;
+        }
+        catch (Exception e)
+        {
+            throw;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}";
+
+        var results = GetCFGsFromSource(code);
+
+        var expected = File.ReadAllText($@"Cfg/Data/{nameof(TestTryCatchFinally)}.gv");
+        results.Should().BeEquivalentTo(expected);
+    }
+
     List<string> GetCFGsFromSource(string code)
     {
         // Parse the code

@@ -11,16 +11,20 @@ namespace Tarp.Cfg;
 public class ControlFlowGraph
 {
     private readonly List<CFGNode> nodes = new();
+    private readonly List<CFGRegion> regions = new();
 
     public ControlFlowGraph()
     {
         EntryNode = AddNewNode(CFGNodeKind.Entry);
         ExitNode = AddNewNode(CFGNodeKind.Exit);
+        Region = AddNewRegion(CFGRegionKind.Try);
     }
 
     public CFGNode EntryNode { get; private set; }
 
     public CFGNode ExitNode { get; private set; }
+
+    public CFGRegion Region { get; private set; }
 
     public IReadOnlyCollection<CFGNode> Nodes { get => nodes; }
 
@@ -28,36 +32,17 @@ public class ControlFlowGraph
     {
         var id = Nodes.Count;
         var node = new CFGNode(id, kind);
+        node.Region = Region;
         nodes.Add(node);
         return node;
     }
 
-    public void Merge(ControlFlowGraph other, CFGNode newEntry, CFGNode newExit)
+    public CFGRegion AddNewRegion(CFGRegionKind kind)
     {
-        var idMap = new Dictionary<int, int>();
-
-        foreach (var node in other.nodes)
-        {
-            var newNode = node.Kind == CFGNodeKind.Entry ? newEntry :
-                node.Kind == CFGNodeKind.Exit ? newExit :
-                AddNewNode(node.Kind);
-
-            idMap[node.Id] = newNode.Id;
-        }
-
-        foreach (var node in other.nodes)
-        {
-            var newNodeId = idMap[node.Id];
-            var newNode = nodes[newNodeId];
-
-            foreach (var succ in node.Successors)
-            {
-                var newSuccId = idMap[succ.Id];
-                var newSucc = nodes[newSuccId];
-
-                newNode.AddSuccessor(newSucc);
-            }
-        }
+        var id = regions.Count;
+        var region = new CFGRegion(id, kind);
+        regions.Add(region);
+        return region;
     }
 
     public void SanityCheck()

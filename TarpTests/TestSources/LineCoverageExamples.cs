@@ -143,5 +143,30 @@ namespace TarpTests.TestSources
             // <-- probe: the decision in [foreach (var i in Enumerable.Range(0, x))] evaluates to false
             // <-- exit probe
         }
+
+        // try-catch
+        public void M8(int x)
+        {
+            try
+            {
+                Console.WriteLine(x);
+                // <-- probe: end of the block
+            }
+            catch (IOException ie)
+            {
+                Console.WriteLine("Failed with IOException {0}", ie.Message);
+                // <-- probe: catch block
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine("Failed: {0}", e.Message);
+                // <-- probe: catch block
+            }
+            finally
+            {
+                Console.WriteLine("Done.");
+                // <-- probe: finally block
+            }
+        }
     }
 }
