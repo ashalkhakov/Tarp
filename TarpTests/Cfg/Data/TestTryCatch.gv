@@ -9,8 +9,9 @@ digraph G
              label = "<exit>\l" ];
     n2 [ shape = "box"
              fontname = "Monospace"
-             label = "<n2>\l0:	x++;\l" ];
+             label = "<try(n2)>\l0:	x++;\l" ];
       n2 -> n4;
+      n2 -> n5;
     n3 [ shape = "box"
              fontname = "Monospace"
              label = "<n3>\l" ];
@@ -21,6 +22,10 @@ digraph G
       n4 -> n3;
     n5 [ shape = "box"
              fontname = "Monospace"
-             label = "<n5>\l" ];
-      n5 -> n4;
+             label = "<(Exception e)\r\n>\l0:	Console.WriteLine(\"Got exception {0}\", e.Message);\l" ];
+      n5 -> n6;
+    n6 [ shape = "box"
+             fontname = "Monospace"
+             label = "<n6>\l" ];
+      n6 -> n4;
 }

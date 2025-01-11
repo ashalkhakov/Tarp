@@ -963,6 +963,7 @@ class MyClass
         }
         catch (Exception e)
         {
+            Console.WriteLine(""Got exception {0}"", e.Message);
             throw;
         }
     }
@@ -993,6 +994,42 @@ class MyClass
         }
         catch (Exception e)
         {
+            Console.WriteLine(""Got exception {0}"", e.Message);
+            throw;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}";
+
+        var results = GetCFGsFromSource(code);
+
+        var expected = File.ReadAllText($@"Cfg/Data/{nameof(TestTryCatchFinally)}.gv");
+        results.Should().BeEquivalentTo(expected);
+    }
+
+    [TestMethod]
+    public void TestTryCatchFinallyNested()
+    {
+        string code = @"
+class MyClass
+{
+    bool busy;
+    int x;
+
+    void Method()
+    {
+        busy = true;
+
+        try
+        {
+            x++;
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine(""Got exception {0}"", e.Message);
             throw;
         }
         finally

@@ -172,6 +172,18 @@ public class ControlFlowGraph
         {
             label = EscapeGraphViz(n.Label.ToString());
         }
+        else if (n.Kind == CFGNodeKind.ExceptionHandler)
+        {
+            label = EscapeGraphViz(n.Condition.ToFullString());
+        }
+        else if (n.Kind == CFGNodeKind.FinallyHandler)
+        {
+            label = $"finally({name})";
+        }
+        else if (n.Kind == CFGNodeKind.Try)
+        {
+            label = $"try({name})";
+        }
 
         return label;
     }

@@ -1,3 +1,5 @@
+# Intro
+
 > try { S }
 > catch (T1 e) { S1 }
 > ...
@@ -105,3 +107,46 @@ https://typeset.io/pdf/constructing-control-flow-graph-for-java-by-decoupling-2u
 so, the Roslyn "region" idea means that all nodes in that region are implicitly covered by that region.
 - all nodes in a TryAndCatch region will be implicitly going out of that region
 - you don't need an explicit edge out of that region, right?
+
+# how we should do it?
+
+we just need to have the ability to add instrumentation to exceptional edges:
+- try block was entered
+- try block was exited via normal flow
+  - catch clause was entered due to exception in the corresponding try block
+  - finally clause was entered from a try block (normal entry)
+  - finally clause was entered from a catch block (exceptional entry)
+
+going back to Roslyn-like design:
+- assign regions to basic blocks
+- allow regions to nest
+- normal control flow in a region: 1 entry, 1 exit
+- each region is of one of these kinds
+  - Try
+    - exceptional control flow: unhandled exception was raised
+  - TryAndCatch
+  - TryAndFinally
+
+let's rewrite the C# code thus
+
+> try {C1} catch (T1 e1) {N1} ... catch (Tn En) {Nn} finally {C2}
+
+into
+
+> try-finally
+>  (try-catch {C1} except (T1 e1) {N1} ... except (Tn En))
+> except C2
+
+where "except" are "catch" clauses in a try-catch and "finally" clause in a try-finally.
+ 
+- in a try-finally, all control ends up in C2
+- in a try-catch, normal control goes to the end, but exceptional control goes to either of the handlers
+
+so we need two kinds of blocks
+- exception handler block (control only goes here if there was an exception)
+  - catch clauses are translated to such blocks
+- finally block (control goes in all cases)
+
+and the try-catch clauses is translated to a CFG like this:
+- B1: try body
+- an exception handler block for each catch clause

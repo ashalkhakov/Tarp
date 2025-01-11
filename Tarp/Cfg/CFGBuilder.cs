@@ -136,6 +136,11 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
         return currentNode;
     }
 
+    public override CFGNode? VisitSwitchStatement(SwitchStatementSyntax node)
+    {
+        throw new System.NotImplementedException();
+    }
+
     public override CFGNode VisitWhileStatement(WhileStatementSyntax node)
     {
         var loopEntry = cfg.AddNewNode(CFGNodeKind.Block);
@@ -441,7 +446,30 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
 
     public override CFGNode? VisitThrowExpression(ThrowExpressionSyntax node)
     {
-        throw new System.NotImplementedException();
+        var jump = cfg.AddNewNode(CFGNodeKind.Jump);
+
+        currentNode.OverrideSuccessors(jump);
+
+        CFGNode finallyNode = null;
+
+        for (var i = exceptionHandlers.Count - 1; i >= 0; i--)
+        {
+            finallyNode = exceptionHandlers[i];
+            if (finallyNode != null)
+            {
+                break;
+            }
+        }
+
+        if (finallyNode == null)
+        {
+            throw new CFGBuilderException("Unable to find exception handling node", node.GetLocation());
+        }
+
+        jump.ToJump(finallyNode);
+        currentNode = jump;
+
+        return jump;
     }
 
     public override CFGNode? VisitThrowStatement(ThrowStatementSyntax node)
@@ -475,26 +503,27 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
     public override CFGNode? VisitTryStatement(TryStatementSyntax node)
     {
         var kont = currentNode.Successors.FirstOrDefault();
-        var tryBody = cfg.AddNewNode(CFGNodeKind.Jump);
+        var tryBody = cfg.AddNewNode(CFGNodeKind.Try);
         var tryExit = currentNode.Successors.FirstOrDefault() ?? cfg.AddNewNode(CFGNodeKind.Block);
-        var finallyNode = cfg.AddNewNode(CFGNodeKind.Block);
+        var finallyNodeKind = node.Finally != null ? CFGNodeKind.FinallyHandler : CFGNodeKind.Block;
+        var finallyNode = cfg.AddNewNode(finallyNodeKind);
 
         if (!currentNode.ToJump(tryBody))
         {
             currentNode.OverrideSuccessors(tryBody);
         }
-        tryBody.ToJump(finallyNode);
-        finallyNode.ToJump(tryExit);
+        finallyNode.OverrideSuccessors(tryExit);
 
-        var catchNodes = node.Catches.Select(c => cfg.AddNewNode(CFGNodeKind.Block)).ToArray();
+        var catchNodes = node.Catches.Select(c => cfg.AddNewNode(CFGNodeKind.ExceptionHandler)).ToArray();
         for (var i = 0; i < node.Catches.Count; i++)
         {
             var catchBody = catchNodes[i];
 
-            catchBody.ToJump(finallyNode);
+            catchBody.OverrideSuccessors(finallyNode);
         }
+        tryBody.ToTry(finallyNode, catchNodes);
 
-        exceptionHandlers.Add(catchNodes.FirstOrDefault());
+        exceptionHandlers.Add(tryBody);
 
         currentNode = tryBody;
         Visit(node.Block);
@@ -509,7 +538,8 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
             var catchClause = node.Catches[i];
 
             currentNode = catchBody;
-            catchBody.ToJump(finallyNode);
+            currentNode.Condition = catchClause.Declaration;
+            catchBody.OverrideSuccessors(finallyNode);
 
             Visit(catchClause.Block);
         }

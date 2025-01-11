@@ -13,7 +13,7 @@ digraph G
       n2 -> n3;
     n3 [ shape = "box"
              fontname = "Monospace"
-             label = "<n3>\l0:	x++;\l" ];
+             label = "<try(n3)>\l0:	x++;\l" ];
       n3 -> n5;
     n4 [ shape = "box"
              fontname = "Monospace"
@@ -21,6 +21,6 @@ digraph G
       n4 -> n1;
     n5 [ shape = "box"
              fontname = "Monospace"
-             label = "<n5>\l0:	busy = false;\l" ];
+             label = "<finally(n5)>\l0:	busy = false;\l" ];
       n5 -> n4;
 }

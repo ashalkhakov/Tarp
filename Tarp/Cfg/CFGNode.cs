@@ -22,7 +22,11 @@ public class CFGNode(int id, CFGNodeKind kind)
     {
         Debug.Assert(Id >= 0);
 
-        Debug.Assert(Successors.Count <= MaxAllowedSuccessors(Kind), "Too many successors");
+        var maxAllowedSuccessors = MaxAllowedSuccessors(Kind);
+        if (maxAllowedSuccessors != null)
+        {
+            Debug.Assert(Successors.Count <= maxAllowedSuccessors.Value, "Too many successors");
+        }
 
         switch (Kind)
         {
@@ -68,6 +72,36 @@ public class CFGNode(int id, CFGNodeKind kind)
                 Debug.Assert(!Label.HasValue, "Label is not allowed");
                 Debug.Assert(Predecessors.Count > 0, "There should be predecessors");
                 break;
+
+            case CFGNodeKind.Try:
+                Debug.Assert(Condition == null, "Condition is not allowed");
+                Debug.Assert(Statements.Count >= 0, "Statements are allowed");
+                Debug.Assert(Successors.Count > 0, "There should be multiple successors");
+                Debug.Assert(!Label.HasValue, "Label is not allowed");
+                Debug.Assert(Predecessors.Count > 0, "There should be predecessors");
+                foreach (var succ in successors.Skip(1))
+                {
+                    Debug.Assert(succ.Kind == CFGNodeKind.ExceptionHandler, "All successors but the first should be exception handlers");
+                }
+                break;
+
+            case CFGNodeKind.ExceptionHandler:
+                Debug.Assert(Condition != null, "Condition is required");
+                Debug.Assert(Statements.Count >= 0, "Statements are allowed");
+                Debug.Assert(Successors.Count == 1, "There should be exactly one successor");
+                Debug.Assert(Predecessors.Count == 1, "There should be exactly one predecessor");
+                Debug.Assert(Predecessors.First().Kind == CFGNodeKind.Try, "Can only be entered from a Try block");
+                break;
+
+            case CFGNodeKind.FinallyHandler:
+                Debug.Assert(Condition == null, "Condition is not allowed");
+                Debug.Assert(Statements.Count >= 0, "Statements are allowed");
+                Debug.Assert(Successors.Count == 1, "There should be exactly one successors");
+                Debug.Assert(!Label.HasValue, "Label is not allowed");
+                Debug.Assert(Predecessors.Count > 0, "There should be predecessors");
+                //Debug.Assert(Predecessors.All(p => p.Kind == CFGNodeKind.ExceptionHandler || p.Kind == CFGNodeKind.Try), "All predecessors must be either exception handlers or the try block");
+                break;
+
             default:
                 Debug.Assert(false);
                 break;
@@ -118,12 +152,21 @@ public class CFGNode(int id, CFGNodeKind kind)
 
     public void ToLabel(SyntaxToken identifier)
     {
-        if (Kind == CFGNodeKind.Branch)
-        {
-
-        }
         Kind = CFGNodeKind.Label;
         Label = identifier;
+    }
+
+    public void ToTry(CFGNode finallyNode, IEnumerable<CFGNode> exceptionHandlers)
+    {
+        Debug.Assert(successors.Count == 0);
+
+        Kind = CFGNodeKind.Try;
+
+        AddSuccessor(finallyNode);
+        foreach (var e in exceptionHandlers)
+        {
+            AddSuccessor(e);
+        }
     }
 
     private List<SyntaxNode> statements = new();
@@ -140,8 +183,8 @@ public class CFGNode(int id, CFGNodeKind kind)
 
     public void AddSuccessor(CFGNode node)
     {
-        int maxSuccessors = MaxAllowedSuccessors(node.Kind);
-        if (successors.Count > maxSuccessors)
+        var maxSuccessors = MaxAllowedSuccessors(node.Kind);
+        if (maxSuccessors != null && successors.Count > maxSuccessors)
         {
             throw new Exception("Cannot add a successor");
         }
@@ -149,7 +192,7 @@ public class CFGNode(int id, CFGNodeKind kind)
         node.predecessors.Add(this);
     }
 
-    private static int MaxAllowedSuccessors(CFGNodeKind kind)
+    private static int? MaxAllowedSuccessors(CFGNodeKind kind)
     {
         return kind == CFGNodeKind.Entry ? 1 :
             kind == CFGNodeKind.Exit ? 0 :
@@ -157,6 +200,9 @@ public class CFGNode(int id, CFGNodeKind kind)
             kind == CFGNodeKind.Branch ? 2 :
             kind == CFGNodeKind.Label ? 1 :
             kind == CFGNodeKind.Jump ? 1 :
+            kind == CFGNodeKind.ExceptionHandler ? 1 :
+            kind == CFGNodeKind.FinallyHandler ? 1 :
+            kind == CFGNodeKind.Try ? null : 
             0;
     }
 

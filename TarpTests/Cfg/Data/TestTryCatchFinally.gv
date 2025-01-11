@@ -13,18 +13,23 @@ digraph G
       n2 -> n3;
     n3 [ shape = "box"
              fontname = "Monospace"
-             label = "<n3>\l0:	x++;\l" ];
+             label = "<try(n3)>\l0:	x++;\l" ];
       n3 -> n5;
+      n3 -> n6;
     n4 [ shape = "box"
              fontname = "Monospace"
              label = "<n4>\l" ];
       n4 -> n1;
     n5 [ shape = "box"
              fontname = "Monospace"
-             label = "<n5>\l0:	busy = false;\l" ];
+             label = "<finally(n5)>\l0:	busy = false;\l" ];
       n5 -> n4;
     n6 [ shape = "box"
              fontname = "Monospace"
-             label = "<n6>\l" ];
-      n6 -> n5;
+             label = "<(Exception e)\r\n>\l0:	Console.WriteLine(\"Got exception {0}\", e.Message);\l" ];
+      n6 -> n7;
+    n7 [ shape = "box"
+             fontname = "Monospace"
+             label = "<n7>\l" ];
+      n7 -> n5;
 }
