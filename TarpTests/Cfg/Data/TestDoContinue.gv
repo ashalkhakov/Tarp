@@ -10,21 +10,21 @@ digraph G
     n2 [ shape = "box"
              fontname = "Monospace"
              label = "<n2>\l0:	var i = 0;\l" ];
-      n2 -> n4;
+      n2 -> n5;
     n3 [ shape = "box"
              fontname = "Monospace"
              label = "<n3>\l" ];
       n3 -> n1;
     n4 [ shape = "box"
              fontname = "Monospace"
-             label = "<i <= a>\l" ];
-      n4 -> n7;
-      n4 -> n6;
+             label = "<true>\l" ];
+      n4 -> n5;
+      n4 -> n3;
     n5 [ shape = "box"
              fontname = "Monospace"
-             label = "<true>\l" ];
-      n5 -> n4;
-      n5 -> n3;
+             label = "<i <= a>\l" ];
+      n5 -> n7;
+      n5 -> n6;
     n6 [ shape = "box"
              fontname = "Monospace"
              label = "<n6>\l" ];
@@ -36,7 +36,7 @@ digraph G
     n8 [ shape = "box"
              fontname = "Monospace"
              label = "<n8>\l" ];
-      n8 -> n5;
+      n8 -> n4;
     n9 [ shape = "box"
              fontname = "Monospace"
              label = "<n9>\l" ];

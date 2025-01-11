@@ -9,32 +9,56 @@ digraph G
              label = "<exit>\l" ];
     n2 [ shape = "box"
              fontname = "Monospace"
-             label = "<n2>\l0:	int rows = matrix.GetLength(0);\l1:	int cols = matrix.GetLength(1);\l2:	int i = 0\l" ];
+             label = "<n2>\l0:	int rows = matrix.GetLength(0);\l" ];
       n2 -> n3;
     n3 [ shape = "box"
              fontname = "Monospace"
-             label = "<i < rows>\l" ];
-      n3 -> n5;
+             label = "<n3>\l0:	int cols = matrix.GetLength(1);\l" ];
       n3 -> n4;
     n4 [ shape = "box"
              fontname = "Monospace"
-             label = "<n4>\l" ];
-      n4 -> n1;
+             label = "<n4>\l0:	int i = 0\l" ];
+      n4 -> n5;
     n5 [ shape = "box"
              fontname = "Monospace"
-             label = "<n5>\l0:	int j = 0\l" ];
-      n5 -> n7;
+             label = "<i < rows>\l" ];
+      n5 -> n8;
+      n5 -> n6;
     n6 [ shape = "box"
              fontname = "Monospace"
-             label = "<n6>\l0:	Console.WriteLine();\l1:	i++\l" ];
-      n6 -> n3;
+             label = "<n6>\l" ];
+      n6 -> n1;
     n7 [ shape = "box"
              fontname = "Monospace"
-             label = "<j < cols>\l" ];
-      n7 -> n8;
-      n7 -> n6;
+             label = "<n7>\l0:	i++\l" ];
+      n7 -> n5;
     n8 [ shape = "box"
              fontname = "Monospace"
-             label = "<n8>\l0:	Console.Write(\"{0}\t\", matrix[i, j]);\l1:	return;\l" ];
-      n8 -> n1;
+             label = "<n8>\l0:	int j = 0\l" ];
+      n8 -> n9;
+    n9 [ shape = "box"
+             fontname = "Monospace"
+             label = "<j < cols>\l" ];
+      n9 -> n12;
+      n9 -> n10;
+    n10 [ shape = "box"
+             fontname = "Monospace"
+             label = "<n10>\l" ];
+      n10 -> n14;
+    n11 [ shape = "box"
+             fontname = "Monospace"
+             label = "<n11>\l0:	j++\l" ];
+      n11 -> n9;
+    n12 [ shape = "box"
+             fontname = "Monospace"
+             label = "<n12>\l0:	Console.Write(\"{0}\t\", matrix[i, j]);\l" ];
+      n12 -> n13;
+    n13 [ shape = "box"
+             fontname = "Monospace"
+             label = "<n13>\l0:	return;\l" ];
+      n13 -> n1;
+    n14 [ shape = "box"
+             fontname = "Monospace"
+             label = "<n14>\l0:	Console.WriteLine();\l" ];
+      n14 -> n7;
 }

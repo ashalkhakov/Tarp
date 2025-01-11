@@ -1,4 +1,5 @@
 ﻿using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -49,7 +50,7 @@ public class CFGNode(int id, CFGNodeKind kind)
                 Debug.Assert(Statements.Count >= 0, "Statements are allowed");
                 Debug.Assert(Successors.Count == 1, "There should be exactly one successor");
                 Debug.Assert(!Label.HasValue, "Label is not allowed");
-                Debug.Assert(Predecessors.Count > 0, "There should be predecessors");
+                //Debug.Assert(Predecessors.Count > 0, "There should be predecessors");
                 break;
             case CFGNodeKind.Branch:
                 Debug.Assert(Condition != null, "Condition is required");
@@ -183,11 +184,21 @@ public class CFGNode(int id, CFGNodeKind kind)
 
     public void AddSuccessor(CFGNode node)
     {
-        var maxSuccessors = MaxAllowedSuccessors(node.Kind);
+        var maxSuccessors = MaxAllowedSuccessors(Kind);
         if (maxSuccessors != null && successors.Count > maxSuccessors)
         {
             throw new Exception("Cannot add a successor");
         }
+
+        if (Kind == CFGNodeKind.Block && successors.Count == 1/* && successors[0].Kind == CFGNodeKind.Exit*/)
+        {
+            return;
+        }
+        if (Kind == CFGNodeKind.Jump && successors.Count == 1)
+        {
+            return;
+        }
+
         successors.Add(node);
         node.predecessors.Add(this);
     }

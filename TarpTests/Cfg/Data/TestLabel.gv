@@ -13,10 +13,30 @@ digraph G
       n2 -> n3;
     n3 [ shape = "box"
              fontname = "Monospace"
-             label = "<lab2>\l0:	r += 3;\l1:	return r;\l" ];
-      n3 -> n1;
+             label = "<lab2>\l" ];
+      n3 -> n8;
     n4 [ shape = "box"
              fontname = "Monospace"
-             label = "<n4>\l0:	int r;\l1:	r = 1;\l2:	r++;\l3:	r *= 2;\l" ];
-      n4 -> n2;
+             label = "<n4>\l0:	int r;\l" ];
+      n4 -> n5;
+    n5 [ shape = "box"
+             fontname = "Monospace"
+             label = "<n5>\l0:	r = 1;\l" ];
+      n5 -> n6;
+    n6 [ shape = "box"
+             fontname = "Monospace"
+             label = "<n6>\l0:	r++;\l" ];
+      n6 -> n7;
+    n7 [ shape = "box"
+             fontname = "Monospace"
+             label = "<n7>\l0:	r *= 2;\l" ];
+      n7 -> n2;
+    n8 [ shape = "box"
+             fontname = "Monospace"
+             label = "<n8>\l0:	r += 3;\l" ];
+      n8 -> n9;
+    n9 [ shape = "box"
+             fontname = "Monospace"
+             label = "<n9>\l0:	return r;\l" ];
+      n9 -> n1;
 }

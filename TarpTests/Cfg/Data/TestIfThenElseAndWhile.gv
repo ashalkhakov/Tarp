@@ -9,32 +9,44 @@ digraph G
              label = "<exit>\l" ];
     n2 [ shape = "box"
              fontname = "Monospace"
-             label = "<x && !y>\l0:	bool x = true;\l1:	bool y = false;\l" ];
-      n2 -> n4;
-      n2 -> n5;
+             label = "<n2>\l0:	bool x = true;\l" ];
+      n2 -> n3;
     n3 [ shape = "box"
              fontname = "Monospace"
-             label = "<n3>\l" ];
-      n3 -> n6;
+             label = "<n3>\l0:	bool y = false;\l" ];
+      n3 -> n4;
     n4 [ shape = "box"
              fontname = "Monospace"
-             label = "<n4>\l0:	Console.WriteLine(\"Decision made\");\l" ];
-      n4 -> n3;
+             label = "<x && !y>\l" ];
+      n4 -> n6;
+      n4 -> n7;
     n5 [ shape = "box"
              fontname = "Monospace"
-             label = "<n5>\l0:	Console.WriteLine(\"Alternative decision\");\l" ];
-      n5 -> n3;
+             label = "<n5>\l" ];
+      n5 -> n8;
     n6 [ shape = "box"
              fontname = "Monospace"
-             label = "<x>\l" ];
-      n6 -> n8;
-      n6 -> n7;
+             label = "<n6>\l0:	Console.WriteLine(\"Decision made\");\l" ];
+      n6 -> n5;
     n7 [ shape = "box"
              fontname = "Monospace"
-             label = "<n7>\l" ];
-      n7 -> n1;
+             label = "<n7>\l0:	Console.WriteLine(\"Alternative decision\");\l" ];
+      n7 -> n5;
     n8 [ shape = "box"
              fontname = "Monospace"
-             label = "<n8>\l0:	Console.WriteLine(\"Looping\");\l1:	x = false;\l" ];
-      n8 -> n6;
+             label = "<x>\l" ];
+      n8 -> n10;
+      n8 -> n9;
+    n9 [ shape = "box"
+             fontname = "Monospace"
+             label = "<n9>\l" ];
+      n9 -> n1;
+    n10 [ shape = "box"
+             fontname = "Monospace"
+             label = "<n10>\l0:	Console.WriteLine(\"Looping\");\l" ];
+      n10 -> n11;
+    n11 [ shape = "box"
+             fontname = "Monospace"
+             label = "<n11>\l0:	x = false;\l" ];
+      n11 -> n8;
 }

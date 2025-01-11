@@ -6,10 +6,25 @@ using System.Linq;
 
 namespace Tarp.Cfg;
 
-public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
+/// <summary>
+/// A CFG fragment is two nodes:
+/// - entry node (without predecessors)
+/// - exit node (without successors)
+/// 
+/// (It may be the same node.)
+///
+/// In the case of jumps (return, throw, continue, break, goto),
+/// the exit node may not be reachable from the entry node.
+/// </summary>
+public class CFGFragment
+{
+    public CFGNode Start { get; set; }
+    public CFGNode End { get; set; }
+}
+
+public class CFGBuilder : CSharpSyntaxVisitor<CFGFragment>
 {
     private readonly ControlFlowGraph cfg = new ControlFlowGraph();
-    private CFGNode currentNode;
     private Stack<(CFGNode BreakNode, CFGNode ContinueNode)> loopContinuations = new();
     private Dictionary<string, CFGNode> labelledBlocks = new();
     private CFGRegion region;
@@ -17,15 +32,17 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
 
     public ControlFlowGraph Build(SyntaxNode root)
     {
-        currentNode = cfg.EntryNode;
         region = cfg.Region;
 
-        Visit(root);
+        var fragment = Visit(root);
+
+        cfg.EntryNode.AddSuccessor(fragment.Start);
+        fragment.End.AddSuccessor(cfg.ExitNode);
 
         return cfg;
     }
 
-    public override CFGNode VisitMethodDeclaration(MethodDeclarationSyntax node)
+    public override CFGFragment VisitMethodDeclaration(MethodDeclarationSyntax node)
     {
         // prepare a block for each labelled statement
         foreach (var statement in node.Body.DescendantNodes().OfType<LabeledStatementSyntax>())
@@ -41,204 +58,174 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
         exceptionHandlers.Add(cfg.ExitNode);
 
         // Visit method body
-        Visit(node.Body);
+        var frag = Visit(node.Body);
 
         exceptionHandlers.RemoveAt(exceptionHandlers.Count - 1);
 
-        if (currentNode.Kind != CFGNodeKind.Exit && currentNode.Successors.Count == 0)
-        {
-            currentNode.AddSuccessor(cfg.ExitNode);
-        }
-
-        cfg.DeleteUnreferencedNodes();
-
-        return currentNode;
+        return frag;
     }
 
-    public override CFGNode VisitBlock(BlockSyntax node)
+    public override CFGFragment VisitBlock(BlockSyntax node)
     {
-        foreach (var st in node.Statements)
+        if (node.Statements.Count == 0)
         {
-            Visit(st);
+            var n = cfg.AddNewNode(CFGNodeKind.Block);
+
+            return new CFGFragment
+            {
+                Start = n,
+                End = n
+            };
         }
 
-        return currentNode;
+        var frag = Visit(node.Statements[0]);
+        for (var i = 1; i < node.Statements.Count; i++)
+        {
+            var next = Visit(node.Statements[i]);
+
+            frag.End.AddSuccessor(next.Start);
+            frag.End = next.End;
+        }
+
+        return frag;
     }
 
-    public override CFGNode VisitIfStatement(IfStatementSyntax node)
+    public override CFGFragment VisitIfStatement(IfStatementSyntax node)
     {
-        if (node.Else == null)
+        var cond = cfg.AddNewNode(CFGNodeKind.Branch);
+        var skip = cfg.AddNewNode(CFGNodeKind.Block);
+
+        if (node.Else != null)
         {
-            var kont = currentNode.Successors.FirstOrDefault();
-            var ifExit = cfg.AddNewNode(CFGNodeKind.Block);
-            var ifBody = cfg.AddNewNode(CFGNodeKind.Block);
+            var c1 = Visit(node.Statement);
+            var c2 = Visit(node.Else);
 
-            if (!currentNode.ToBranch(node.Condition, ifBody, ifExit))
+            cond.Condition = node.Condition;
+            cond.AddSuccessor(c1.Start);
+            cond.AddSuccessor(c2.Start);
+
+            c1.End.AddSuccessor(skip);
+            c2.End.AddSuccessor(skip);
+
+            return new CFGFragment
             {
-                var newNode = cfg.AddNewNode(CFGNodeKind.Branch);
-                currentNode.AddSuccessor(newNode);
-                newNode.ToBranch(node.Condition, ifBody, ifExit);
-            }
-
-            ifBody.AddSuccessor(ifExit);
-
-            currentNode = ifBody;
-
-            Visit(node.Statement);
-
-            currentNode = ifExit;
-            if (currentNode.Kind == CFGNodeKind.Block && currentNode.Successors.Count == 0 && kont != null)
-            {
-                currentNode.AddSuccessor(kont);
-            }
-
-            return currentNode;
+                Start = cond,
+                End = skip
+            };
         }
         else
         {
-            var kont = currentNode.Successors.FirstOrDefault();
-            var ifExit = cfg.AddNewNode(CFGNodeKind.Block);
-            var ifBody = cfg.AddNewNode(CFGNodeKind.Block);
-            var elseBody = cfg.AddNewNode(CFGNodeKind.Block);
+            var c1 = Visit(node.Statement);
 
-            if (!currentNode.ToBranch(node.Condition, ifBody, elseBody))
+            cond.Condition = node.Condition;
+            cond.AddSuccessor(c1.Start);
+            cond.AddSuccessor(skip);
+
+            c1.End.AddSuccessor(skip);
+
+            return new CFGFragment
             {
-                var ifBranch = cfg.AddNewNode(CFGNodeKind.Branch);
-                ifBranch.ToBranch(node.Condition, ifBody, elseBody);
-                currentNode.AddSuccessor(ifBranch);
-            }
-
-            ifBody.AddSuccessor(ifExit);
-            elseBody.AddSuccessor(ifExit);
-
-            currentNode = ifBody;
-
-            Visit(node.Statement);
-
-            currentNode = elseBody;
-
-            Visit(node.Else);
-
-            currentNode = ifExit;
-            if (currentNode.Kind == CFGNodeKind.Block && currentNode.Successors.Count == 0 && kont != null)
-            {
-                currentNode.AddSuccessor(kont);
-            }
-
-            return currentNode;
+                Start = cond,
+                End = skip
+            };
         }
     }
 
-    public override CFGNode? VisitElseClause(ElseClauseSyntax node)
+    public override CFGFragment VisitElseClause(ElseClauseSyntax node)
     {
-        Visit(node.Statement);
-
-        return currentNode;
+        return Visit(node.Statement);
     }
 
-    public override CFGNode? VisitSwitchStatement(SwitchStatementSyntax node)
+    public override CFGFragment VisitSwitchStatement(SwitchStatementSyntax node)
     {
         throw new System.NotImplementedException();
     }
 
-    public override CFGNode VisitWhileStatement(WhileStatementSyntax node)
+    public override CFGFragment VisitWhileStatement(WhileStatementSyntax node)
     {
-        var loopEntry = cfg.AddNewNode(CFGNodeKind.Block);
-        var loopExit = currentNode.Successors.FirstOrDefault() ?? cfg.AddNewNode(CFGNodeKind.Block);
-        var loopBody = cfg.AddNewNode(CFGNodeKind.Block);
+        var loopEntry = cfg.AddNewNode(CFGNodeKind.Branch);
+        var skip = cfg.AddNewNode(CFGNodeKind.Block);
 
-        currentNode.AddSuccessor(loopEntry);
+        loopContinuations.Push((skip, loopEntry));
 
-        loopEntry.ToBranch(node.Condition, loopBody, loopExit);
-
-        currentNode = loopBody;
-        loopContinuations.Push((loopExit, loopEntry));
-
-        Visit(node.Statement);
+        var loopBody = Visit(node.Statement);
 
         loopContinuations.Pop();
-        if (currentNode.Kind == CFGNodeKind.Block && currentNode.Successors.Count == 0)
+
+        loopEntry.Condition = node.Condition;
+        loopEntry.AddSuccessor(loopBody.Start);
+        loopEntry.AddSuccessor(skip);
+
+        loopBody.End.AddSuccessor(loopEntry);
+
+        return new CFGFragment
         {
-            currentNode.AddSuccessor(loopEntry);
-        }
-
-        currentNode = loopExit;
-
-        return currentNode;
+            Start = loopEntry,
+            End = skip
+        };
     }
 
-    public override CFGNode? VisitDoStatement(DoStatementSyntax node)
+    public override CFGFragment VisitDoStatement(DoStatementSyntax node)
     {
-        var loopEntry = currentNode;
-        var loopExit = currentNode.Successors.FirstOrDefault() ?? cfg.AddNewNode(CFGNodeKind.Block);
-        var loopBody = cfg.AddNewNode(CFGNodeKind.Block);
+        var loopExit = cfg.AddNewNode(CFGNodeKind.Block);
         var loopCheck = cfg.AddNewNode(CFGNodeKind.Block);
 
-        loopEntry.OverrideSuccessors(loopBody);
-        loopCheck.ToBranch(node.Condition, loopBody, loopExit);
-
-        currentNode = loopBody;
         loopContinuations.Push((loopExit, loopCheck));
 
-        Visit(node.Statement);
+        var loopBody = Visit(node.Statement);
 
-        if (currentNode.Kind == CFGNodeKind.Block && currentNode.Successors.Count == 0)
-        {
-            currentNode.AddSuccessor(loopCheck);
-        }
+        loopCheck.ToBranch(node.Condition, loopBody.Start, loopExit);
 
         loopContinuations.Pop();
-        currentNode = loopExit;
 
-        return currentNode;
+        loopBody.End.AddSuccessor(loopCheck);
+
+        return new CFGFragment
+        {
+            Start = loopBody.Start,
+            End = loopExit
+        };
     }
 
-    public override CFGNode? VisitForStatement(ForStatementSyntax node)
+    public override CFGFragment VisitForStatement(ForStatementSyntax node)
     {
-        var loopInit = currentNode;
+        var loopInit = node.Declaration != null || node.Initializers.Count > 0 ? cfg.AddNewNode(CFGNodeKind.Block) : null;
         var loopEntry = cfg.AddNewNode(CFGNodeKind.Block);
-        var loopExit = currentNode.Successors.FirstOrDefault() ?? cfg.AddNewNode(CFGNodeKind.Block);
-        var loopBody = cfg.AddNewNode(CFGNodeKind.Block);
+        var loopExit = cfg.AddNewNode(CFGNodeKind.Block);
         var loopIncrement = node.Incrementors.Count == 0 ? null : cfg.AddNewNode(CFGNodeKind.Block);
+
+        loopContinuations.Push((loopExit, loopIncrement ?? loopEntry));
+
+        var loopBody = Visit(node.Statement);
+
+        loopContinuations.Pop();
 
         if (node.Declaration != null)
         {
             loopInit.AddStatement(node.Declaration);
         }
 
-        foreach (var init in node.Initializers)
+        if (node.Initializers.Count > 0)
         {
-            loopInit.AddStatement(init);
+            foreach (var init in node.Initializers)
+            {
+                loopInit.AddStatement(init);
+            }
         }
 
-        loopInit.OverrideSuccessors(loopEntry);
+        if (loopInit != null)
+        {
+            loopInit.AddSuccessor(loopEntry);
+        }
 
         if (node.Condition != null)
         {
-            loopEntry.ToBranch(node.Condition, loopBody, loopExit);
+            loopEntry.ToBranch(node.Condition, loopBody.Start, loopExit);
         }
         else
         {
-            loopEntry.ToJump(loopBody);
+            loopEntry.ToJump(loopBody.Start);
         }
-
-        if (loopIncrement != null)
-        {
-            loopBody.AddSuccessor(loopIncrement);
-            loopIncrement.AddSuccessor(loopEntry);
-        }
-        else
-        {
-            loopBody.AddSuccessor(loopEntry);
-        }
-
-        currentNode = loopBody;
-
-        loopContinuations.Push((loopExit, loopIncrement));
-
-        Visit(node.Statement);
-
-        loopContinuations.Pop();
 
         if (loopIncrement != null)
         {
@@ -246,24 +233,23 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
             {
                 loopIncrement.AddStatement(incrementor);
             }
-            if (currentNode.Kind == CFGNodeKind.Block && currentNode.Successors.Count == 0)
-            {
-                currentNode.AddSuccessor(loopIncrement);
-            }
+
+            loopBody.End.AddSuccessor(loopIncrement);
+            loopIncrement.AddSuccessor(loopEntry);
         }
         else
         {
-            if (currentNode.Kind == CFGNodeKind.Block && currentNode.Successors.Count == 0)
-            {
-                currentNode.AddSuccessor(loopEntry);
-            }
+            loopBody.End.AddSuccessor(loopEntry);
         }
 
-        currentNode = loopExit;
-
-        return currentNode;
+        return new CFGFragment
+        {
+            Start = loopInit ?? loopEntry,
+            End = loopExit
+        };
     }
 
+#if false
     public override CFGNode? VisitForEachStatement(ForEachStatementSyntax node)
     {
         // foreach (var r in E) { ... }
@@ -271,8 +257,8 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
 
         return base.VisitForEachStatement(node);
     }
-
-    public override CFGNode? VisitLabeledStatement(LabeledStatementSyntax node)
+#endif
+    public override CFGFragment VisitLabeledStatement(LabeledStatementSyntax node)
     {
         var identifier = node.Identifier;
         var statement = node.Statement;
@@ -287,21 +273,20 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
             throw new CFGBuilderException("Block for labeled statement has already been processed", node.GetLocation());
         }
 
-        // don't override the successors (it could be a e.g. return statement)
-        if (currentNode.Successors.Count == 0)
-        {
-            currentNode.AddSuccessor(labelEntry);
-        }
-
         labelEntry.ToLabel(identifier);
 
-        currentNode = labelEntry;
-        Visit(statement);
+        var next = Visit(statement);
 
-        return currentNode;
+        labelEntry.AddSuccessor(next.Start);
+
+        return new CFGFragment
+        {
+            Start = labelEntry,
+            End = next.End
+        };
     }
 
-    public override CFGNode? VisitGotoStatement(GotoStatementSyntax node)
+    public override CFGFragment VisitGotoStatement(GotoStatementSyntax node)
     {
         if (node.CaseOrDefaultKeyword.Value != null)
         {
@@ -317,60 +302,79 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
 
         var jump = cfg.AddNewNode(CFGNodeKind.Jump);
 
-        currentNode.OverrideSuccessors(jump);
-
         jump.ToJump(dest);
-        currentNode = jump;
 
-        return jump;
+        return new CFGFragment
+        {
+            Start = jump,
+            End = jump
+        };
     }
 
-    public override CFGNode? VisitBreakStatement(BreakStatementSyntax node)
+    public override CFGFragment VisitBreakStatement(BreakStatementSyntax node)
     {
         var e = loopContinuations.Peek();
         var jump = cfg.AddNewNode(CFGNodeKind.Jump);
-
-        currentNode.OverrideSuccessors(jump);
 
         jump.ToJump(e.BreakNode);
-        currentNode = jump;
 
-        return jump;
+        return new CFGFragment
+        {
+            Start = jump,
+            End = jump
+        };
     }
 
-    public override CFGNode? VisitContinueStatement(ContinueStatementSyntax node)
+    public override CFGFragment VisitContinueStatement(ContinueStatementSyntax node)
     {
         var e = loopContinuations.Peek();
         var jump = cfg.AddNewNode(CFGNodeKind.Jump);
 
-        currentNode.OverrideSuccessors(jump);
-
         jump.ToJump(e.ContinueNode);
-        currentNode = jump;
 
-        return jump;
+        return new CFGFragment
+        {
+            Start = jump,
+            End = jump
+        };
     }
 
-    public override CFGNode VisitExpressionStatement(ExpressionStatementSyntax node)
+    public override CFGFragment VisitExpressionStatement(ExpressionStatementSyntax node)
     {
-        AddSyntaxNode(node);
-        return currentNode;
+        var n = cfg.AddNewNode(CFGNodeKind.Block);
+        n.AddStatement(node);
+        return new CFGFragment
+        {
+            Start = n,
+            End = n
+        };
     }
 
-    public override CFGNode? VisitLocalDeclarationStatement(LocalDeclarationStatementSyntax node)
+    public override CFGFragment VisitLocalDeclarationStatement(LocalDeclarationStatementSyntax node)
     {
-        AddSyntaxNode(node);
-        return currentNode;
+        var n = cfg.AddNewNode(CFGNodeKind.Block);
+        n.AddStatement(node);
+        return new CFGFragment
+        {
+            Start = n,
+            End = n
+        };
     }
 
-    public override CFGNode? VisitReturnStatement(ReturnStatementSyntax node)
+    public override CFGFragment VisitReturnStatement(ReturnStatementSyntax node)
     {
-        currentNode.AddStatement(node);
-        currentNode.OverrideSuccessors(cfg.ExitNode);
+        var n1 = cfg.AddNewNode(CFGNodeKind.Block);
+        n1.AddStatement(node);
+        n1.AddSuccessor(cfg.ExitNode);
 
-        return currentNode;
+        return new CFGFragment
+        {
+            Start = n1,
+            End = n1
+        };
     }
 
+#if false
     public void AddSyntaxNode(StatementSyntax node)
     {
         if (currentNode.Kind == CFGNodeKind.Entry)
@@ -560,4 +564,5 @@ public class CFGBuilder : CSharpSyntaxVisitor<CFGNode>
 
         return currentNode;
     }
+#endif
 }

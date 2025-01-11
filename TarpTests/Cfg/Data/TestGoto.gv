@@ -9,27 +9,31 @@ digraph G
              label = "<exit>\l" ];
     n2 [ shape = "box"
              fontname = "Monospace"
-             label = "<Lstart>\l0:	Console.WriteLine(c);\l1:	c++;\l" ];
-      n2 -> n6;
+             label = "<Lstart>\l" ];
+      n2 -> n4;
     n3 [ shape = "box"
              fontname = "Monospace"
              label = "<n3>\l0:	int c = 0;\l" ];
       n3 -> n2;
     n4 [ shape = "box"
              fontname = "Monospace"
-             label = "<n4>\l" ];
-      n4 -> n1;
+             label = "<n4>\l0:	Console.WriteLine(c);\l" ];
+      n4 -> n5;
     n5 [ shape = "box"
              fontname = "Monospace"
-             label = "<n5>\l" ];
-      n5 -> n7;
+             label = "<n5>\l0:	c++;\l" ];
+      n5 -> n6;
     n6 [ shape = "box"
              fontname = "Monospace"
              label = "<c < x>\l" ];
-      n6 -> n5;
-      n6 -> n4;
+      n6 -> n8;
+      n6 -> n7;
     n7 [ shape = "box"
              fontname = "Monospace"
              label = "<n7>\l" ];
-      n7 -> n2;
+      n7 -> n1;
+    n8 [ shape = "box"
+             fontname = "Monospace"
+             label = "<n8>\l" ];
+      n8 -> n2;
 }

@@ -9,6 +9,18 @@ digraph G
              label = "<exit>\l" ];
     n2 [ shape = "box"
              fontname = "Monospace"
-             label = "<n2>\l0:	x += 1;\l1:	var z = 2 * x;\l2:	y = x + 2;\l3:	return x + y + z;\l" ];
-      n2 -> n1;
+             label = "<n2>\l0:	x += 1;\l" ];
+      n2 -> n3;
+    n3 [ shape = "box"
+             fontname = "Monospace"
+             label = "<n3>\l0:	var z = 2 * x;\l" ];
+      n3 -> n4;
+    n4 [ shape = "box"
+             fontname = "Monospace"
+             label = "<n4>\l0:	y = x + 2;\l" ];
+      n4 -> n5;
+    n5 [ shape = "box"
+             fontname = "Monospace"
+             label = "<n5>\l0:	return x + y + z;\l" ];
+      n5 -> n1;
 }

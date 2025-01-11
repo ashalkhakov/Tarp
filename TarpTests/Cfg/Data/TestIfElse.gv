@@ -9,19 +9,27 @@ digraph G
              label = "<exit>\l" ];
     n2 [ shape = "box"
              fontname = "Monospace"
-             label = "<a > 0>\l0:	int r;\l" ];
-      n2 -> n4;
-      n2 -> n5;
+             label = "<n2>\l0:	int r;\l" ];
+      n2 -> n3;
     n3 [ shape = "box"
              fontname = "Monospace"
-             label = "<n3>\l0:	return r;\l" ];
-      n3 -> n1;
+             label = "<a > 0>\l" ];
+      n3 -> n5;
+      n3 -> n6;
     n4 [ shape = "box"
              fontname = "Monospace"
-             label = "<n4>\l0:	r = 1;\l" ];
-      n4 -> n3;
+             label = "<n4>\l" ];
+      n4 -> n7;
     n5 [ shape = "box"
              fontname = "Monospace"
-             label = "<n5>\l0:	r = -1;\l" ];
-      n5 -> n3;
+             label = "<n5>\l0:	r = 1;\l" ];
+      n5 -> n4;
+    n6 [ shape = "box"
+             fontname = "Monospace"
+             label = "<n6>\l0:	r = -1;\l" ];
+      n6 -> n4;
+    n7 [ shape = "box"
+             fontname = "Monospace"
+             label = "<n7>\l0:	return r;\l" ];
+      n7 -> n1;
 }
