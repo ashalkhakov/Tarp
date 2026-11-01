@@ -68,13 +68,13 @@ namespace Tarp.McDc
             //Debug.Assert(r >= 0 && r < 32);
             //Debug.Assert(l <= r);
 
-            var min = 1 << 2 * l;
-            var min2 = 1 << 2 * l + 1;
+            // mask both the true and the false bit of every condition in [l, r], not just the two ends
+            for (var pos = l; pos <= r; pos++)
+            {
+                mask |= 3 << 2 * pos;
+            }
 
-            var max = 1 << 2 * r;
-            var max2 = 1 << 2 * r + 1;
-
-            return mask | min | min2 | max | max2;
+            return mask;
         }
 
         public static int SetMask(PathElem? path, int mask, bool? v)
@@ -129,31 +129,42 @@ namespace Tarp.McDc
             var falseMask = ~SetMask(path, 0, false);
             var falseDone = DecisionComplete(path, false);
 
-            // TODO: code to emit the C# function (one per condition)
-            /*
-             * void Mark(bool isTrue) {
-             *   if (isTrue) {
-             *     temp[0] = <trueBit>;
-             *     <if trueMask {>
-             *       temp[0] &= <trueMask>;
-             *     <}>
-             *     <if trueDone {>
-             *       indArray[0] |= temp[0];
-             *     <}>
-             *   } else {
-             *     temp[0] = <falseBit>;
-             *     <if falseMask {>
-             *       temp[0] &= <falseMask>;
-             *     <}>
-             *     <if falseDone {>
-             *       indArray[0] |= temp[0];
-             *     <}>
-             *   }
-             * }
-             */
+            // the marker is not emitted into the instrumented program: the runtime records the
+            // evaluated conditions, and Mark replays them offline (see McDcAnalyzer)
             var result = new MarkerFunction(node, path, trueBit, trueMask, trueDone, falseBit, falseMask, falseDone);
 
             return result;
+        }
+
+        /*
+         * The behaviour of one condition's marker: fold the condition's value into the vector of the
+         * current evaluation (temp), clearing the conditions it masks, and once the decision is complete,
+         * add the surviving (non-masked) condition values to the indicator.
+         *
+         * NOTE: temp accumulates (|=) over the evaluation, it is reset per evaluation of the decision.
+         */
+        public static void Mark(MarkerFunction marker, bool isTrue, ref int temp, ref int indicator)
+        {
+            Debug.Assert(marker != null);
+
+            if (isTrue)
+            {
+                temp |= marker.TrueBit;
+                temp &= marker.TrueMask;
+                if (marker.TrueDone)
+                {
+                    indicator |= temp;
+                }
+            }
+            else
+            {
+                temp |= marker.FalseBit;
+                temp &= marker.FalseMask;
+                if (marker.FalseDone)
+                {
+                    indicator |= temp;
+                }
+            }
         }
 
         private void GenMarkers(McDcNode node, PathElem? path, List<MarkerFunction> functions)
