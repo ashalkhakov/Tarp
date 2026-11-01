@@ -23,6 +23,25 @@ jobs:
       - run: dotnet build McDcTestCoverage.sln -c Release
       - run: dotnet test TarpTests -c Release --no-build
 
+  # Tarp's MC/DC verdicts against the NASA MC/DC tutorial's worked examples, clang's MC/DC, and two
+  # reference checkers written from the definitions (see crosscheck/crosscheck.py)
+  crosscheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+      - name: LLVM 18 (clang's -fcoverage-mcdc, llvm-cov --show-mcdc)
+        run: sudo apt-get update && sudo apt-get install -y clang-18 llvm-18
+      - run: python3 -I crosscheck/crosscheck.py crosscheck/tarp-runner "$RUNNER_TEMP/crosscheck"
+        env:
+          CLANG: clang-18
+          LLVM_PROFDATA: llvm-profdata-18
+          LLVM_COV: llvm-cov-18
+
   # the packed tool on a real solution
   e2e:
     strategy:
