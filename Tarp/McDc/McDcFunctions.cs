@@ -116,6 +116,16 @@ namespace Tarp.McDc
             }
         }
 
+        // like DecisionComplete, but gives the decision's outcome when the condition's value completes it
+        public static bool? DecisionOutcome(PathElem? path, bool? v)
+        {
+            if (v == null || path == null)
+            {
+                return v;
+            }
+            return DecisionOutcome(path.Up, OpVal(path, v));
+        }
+
         public static MarkerFunction GenMarker(McDcNode node, PathElem? path)
         {
             Debug.Assert(node != null);

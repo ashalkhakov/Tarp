@@ -21,6 +21,13 @@ public sealed class OrdersTests
     }
 
     [TestMethod]
+    public void Describes()
+    {
+        Assert.AreEqual("abc", Orders.Describe("abc"));
+        Assert.AreEqual("null", Orders.Describe(null));
+    }
+
+    [TestMethod]
     public void Parses()
     {
         Assert.AreEqual(12, Orders.Parse("12"));

@@ -3,29 +3,41 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using System.Collections.Generic;
 using System.Linq;
+using Tarp.Types;
 using static Microsoft.CodeAnalysis.CSharp.SyntaxFactory;
 
 namespace Tarp.McDc;
 
 /*
- * Rewrites every decision
+ * Rewrites every condition of every decision, e.g. the conditions of
  *
- *   a && (b || !c)
+ *   o is string s && s.Length > 0
  *
- * into
+ * into (one line each in the output)
  *
- *   global::TarpGen.McDc.End(global::TarpGen.McDc.Begin(17), global::TarpGen.McDc.C(17, 0, a) && (global::TarpGen.McDc.C(17, 1, b) || !global::TarpGen.McDc.C(17, 2, c)))
+ *   ((o is string s) && global::TarpGen.McDc.Yes0(out var __tarp17, 17, true, 0) || global::TarpGen.McDc.No0(out __tarp17, 17, false, 1) && false)
+ *   ((s.Length > 0) && global::TarpGen.McDc.Yes(ref __tarp17, 17, 1, true, 2) || global::TarpGen.McDc.No(ref __tarp17, 17, 1, false, 1) && false)
  *
- * The calls are identities with a side effect: C records the condition's value, End records the
- * vector of evaluated conditions (and their values) together with the outcome. Begin is an argument,
- * not a "Begin(17) && ...", so whatever is assigned unconditionally in the decision stays definitely
- * assigned.
+ * Yes returns true and No returns false, so each condition keeps its value; both record it in the
+ * evaluation's frame, the local __tarp17 (declared by the first condition's marker, which is always
+ * evaluated first). The marker whose value completes the decision records the evaluation, with the
+ * outcome, which is known statically (McDcFunctions.DecisionOutcome): "done" is 0 if the value doesn't
+ * complete the decision, else 1 + the outcome.
+ *
+ * Nothing wraps the decision, and "&& false" tells the compiler that the second branch never makes the
+ * condition true: so the compiler still knows what each condition guarantees, e.g. that s is assigned
+ * when "o is string s" is true. For a condition whose pattern variables are assigned when it's false
+ * (o is not string s), the mirror image keeps that instead:
+ *
+ *   !(!(o is not string s) && Yes0(out var __tarp17, 17, false, ...) || No0(out __tarp17, 17, true, ...) && false)
+ *
+ * The frame being a local, an evaluation can span an await, threads, and recursive calls.
  *
  * Decisions are:
  * - maximal &&/|| expressions (anywhere, including nested in a condition, e.g. in a lambda)
  * - the controlling expression of if/while/do/for/?:, even with a single condition
  *
- * Decisions we can't wrap without changing the program's meaning (or making it not compile) are
+ * Decisions we can't instrument without changing the program's meaning (or making it not compile) are
  * left alone and listed in the map as skipped, with the reason.
  */
 public sealed class DecisionRewriter : CSharpSyntaxRewriter
@@ -108,7 +120,7 @@ public sealed class DecisionRewriter : CSharpSyntaxRewriter
     private ExpressionSyntax InstrumentDecision(ExpressionSyntax e)
     {
         var conditions = new List<ExpressionSyntax>();
-        DecisionTree.Build(e, conditions);
+        var tree = DecisionTree.Build(e, conditions);
 
         var lineSpan = e.GetLocation().GetLineSpan().StartLinePosition;
         var reason = _excluded.TryGetValue(e.SpanStart, out var excludedReason) ? excludedReason : WhyNotInstrumentable(e, conditions);
@@ -124,7 +136,7 @@ public sealed class DecisionRewriter : CSharpSyntaxRewriter
                 Reason = reason
             });
             var index0 = 0;
-            return Rewrite(e, null, ref index0);
+            return Rewrite(e, null, null, ref index0);
         }
 
         var id = _map.Decisions.Count;
@@ -139,37 +151,28 @@ public sealed class DecisionRewriter : CSharpSyntaxRewriter
             Conditions = conditions.Select(c => c.ToString()).ToList()
         });
 
+        var markers = new McDcFunctions().CreateMarkers(tree);
         var index = 0;
-        var body = Rewrite(e, id, ref index);
-
-        var call = InvocationExpression(
-            ParseExpression(Runtime + ".End"),
-            ArgumentList(SeparatedList(new[]
-            {
-                Argument(InvocationExpression(ParseExpression(Runtime + ".Begin"), ArgumentList(SingletonSeparatedList(Argument(Literal(id)))))),
-                Argument(body.WithoutTrivia())
-            })));
-
-        return call.WithTriviaFrom(e);
+        return Rewrite(e, id, markers, ref index);
     }
 
-    // rewrites the structure of the decision, wrapping each condition with C(...) (unless id is null)
-    private ExpressionSyntax Rewrite(ExpressionSyntax e, int? id, ref int index)
+    // rewrites the structure of the decision, adding markers to each condition (unless id is null)
+    private ExpressionSyntax Rewrite(ExpressionSyntax e, int? id, IReadOnlyList<MarkerFunction>? markers, ref int index)
     {
         switch (e)
         {
             case ParenthesizedExpressionSyntax p:
-                return p.WithExpression(Rewrite(p.Expression, id, ref index));
+                return p.WithExpression(Rewrite(p.Expression, id, markers, ref index));
 
             case BinaryExpressionSyntax b when DecisionTree.IsLogical(b):
                 {
-                    var l = Rewrite(b.Left, id, ref index);
-                    var r = Rewrite(b.Right, id, ref index);
+                    var l = Rewrite(b.Left, id, markers, ref index);
+                    var r = Rewrite(b.Right, id, markers, ref index);
                     return b.WithLeft(l).WithRight(r);
                 }
 
             case PrefixUnaryExpressionSyntax u when u.IsKind(SyntaxKind.LogicalNotExpression):
-                return u.WithOperand(Rewrite(u.Operand, id, ref index));
+                return u.WithOperand(Rewrite(u.Operand, id, markers, ref index));
 
             default:
                 {
@@ -181,27 +184,54 @@ public sealed class DecisionRewriter : CSharpSyntaxRewriter
                     }
 
                     var i = index++;
-                    var call = InvocationExpression(
-                        ParseExpression(Runtime + ".C"),
-                        ArgumentList(SeparatedList(new[]
-                        {
-                            Argument(Literal(id.Value)),
-                            Argument(Literal(i)),
-                            Argument(condition.WithoutTrivia())
-                        })));
-                    return call.WithTriviaFrom(condition);
+                    return Mark(e, condition, id.Value, i, markers![i]);
                 }
         }
     }
 
-    private static LiteralExpressionSyntax Literal(int value) =>
-        LiteralExpression(SyntaxKind.NumericLiteralExpression, SyntaxFactory.Literal(value));
+    // condition: the original, to look at; rewritten: what goes into the output
+    private static ExpressionSyntax Mark(ExpressionSyntax condition, ExpressionSyntax rewritten, int id, int i, MarkerFunction marker)
+    {
+        var frame = "__tarp" + id;
+
+        string Call(string name, bool value, bool declare)
+        {
+            var outcome = McDcFunctions.DecisionOutcome(marker.Path, value);
+            var done = outcome == null ? 0 : outcome.Value ? 2 : 1;
+            var v = value ? "true" : "false";
+            return i == 0
+                ? $"{Runtime}.{name}0(out {(declare ? "var " : "")}{frame}, {id}, {v}, {done})"
+                : $"{Runtime}.{name}(ref {frame}, {id}, {i}, {v}, {done})";
+        }
+
+        var template = AssignsWhenFalse(condition)
+            ? $"!(!__tarpCondition && {Call("Yes", false, true)} || {Call("No", true, false)} && false)"
+            : $"(__tarpCondition && {Call("Yes", true, true)} || {Call("No", false, false)} && false)";
+
+        var marked = ParseExpression(template);
+        var placeholder = marked.DescendantNodes().OfType<IdentifierNameSyntax>().Single(n => n.Identifier.Text == "__tarpCondition");
+        return marked
+            .ReplaceNode(placeholder, ParenthesizedExpression(rewritten.WithoutTrivia()))
+            .WithTriviaFrom(rewritten);
+    }
+
+    // o is not string s: s is assigned when the condition is false
+    private static bool AssignsWhenFalse(ExpressionSyntax condition) =>
+        condition is IsPatternExpressionSyntax { Pattern: UnaryPatternSyntax not } &&
+        not.IsKind(SyntaxKind.NotPattern) &&
+        DescendantsOutsideNestedFunctions(not).Any(n => n is SingleVariableDesignationSyntax);
 
     private string? WhyNotInstrumentable(ExpressionSyntax e, List<ExpressionSyntax> conditions)
     {
         if (conditions.Count > MaxConditions)
         {
             return $"more than {MaxConditions} conditions";
+        }
+
+        // the markers declare the frame with "out var" in any expression, which needs C# 7.3
+        if (e.SyntaxTree.Options is CSharpParseOptions { LanguageVersion: < LanguageVersion.CSharp7_3 })
+        {
+            return "needs C# 7.3 or later";
         }
 
         if (_model.GetConstantValue(e).HasValue)
@@ -244,29 +274,6 @@ public sealed class DecisionRewriter : CSharpSyntaxRewriter
             }
         }
 
-        var inThisFunction = DescendantsOutsideNestedFunctions(e).ToList();
-
-        if (inThisFunction.Any(n => n is AwaitExpressionSyntax))
-        {
-            return "contains await";
-        }
-
-        // pattern variables are assigned "when true" (or "when false"): wrapping the conditions loses that
-        if (inThisFunction.Any(n => n is SingleVariableDesignationSyntax d && d.Parent is not DeclarationExpressionSyntax ||
-                                    n is ParenthesizedVariableDesignationSyntax))
-        {
-            return "declares pattern variables";
-        }
-
-        // same for anything assigned by a condition that isn't always evaluated (all but the first)
-        foreach (var c in conditions.Skip(1))
-        {
-            if (DescendantsOutsideNestedFunctions(c).Any(IsAssignment))
-            {
-                return "assigns a variable in a condition after the first";
-            }
-        }
-
         return null;
     }
 
@@ -279,13 +286,4 @@ public sealed class DecisionRewriter : CSharpSyntaxRewriter
     private static IEnumerable<SyntaxNode> DescendantsOutsideNestedFunctions(SyntaxNode node) =>
         node.DescendantNodesAndSelf(n => n == node || n is not (AnonymousFunctionExpressionSyntax or LocalFunctionStatementSyntax));
 
-    private static bool IsAssignment(SyntaxNode n) => n switch
-    {
-        AssignmentExpressionSyntax => true,
-        DeclarationExpressionSyntax => true,
-        ArgumentSyntax a => a.RefKindKeyword.IsKind(SyntaxKind.OutKeyword) || a.RefKindKeyword.IsKind(SyntaxKind.RefKeyword),
-        PrefixUnaryExpressionSyntax u => u.IsKind(SyntaxKind.PreIncrementExpression) || u.IsKind(SyntaxKind.PreDecrementExpression),
-        PostfixUnaryExpressionSyntax u => u.IsKind(SyntaxKind.PostIncrementExpression) || u.IsKind(SyntaxKind.PostDecrementExpression),
-        _ => false
-    };
 }

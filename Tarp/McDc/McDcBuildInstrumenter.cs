@@ -244,12 +244,13 @@ public class McDcBuildInstrumenter
         }
 
         var node = error.Location.SourceTree!.GetRoot().FindNode(error.Location.SourceSpan, getInnermostNodeForTie: true);
-        var call = node.AncestorsAndSelf().OfType<InvocationExpressionSyntax>().FirstOrDefault(IsEndCall);
+        // the innermost marked condition the error is in (an excluded decision has no markers, so the next
+        // round finds the decision around it)
+        var id = node.AncestorsAndSelf().Select(MarkedDecisionId).FirstOrDefault(i => i != null);
 
         IEnumerable<DecisionEntry> decisions;
-        if (call != null && !giveUp)
+        if (id != null && !giveUp)
         {
-            var id = int.Parse(((InvocationExpressionSyntax)call.ArgumentList.Arguments[0].Expression).ArgumentList.Arguments[0].ToString(), System.Globalization.CultureInfo.InvariantCulture);
             decisions = map.Decisions.Where(d => d.Id == id);
         }
         else
@@ -268,8 +269,19 @@ public class McDcBuildInstrumenter
         return progress;
     }
 
-    private static bool IsEndCall(InvocationExpressionSyntax call) =>
-        call.Expression.ToString() == "global::TarpGen.McDc.End";
+    // a marked condition is "(condition && Yes...(...) || No...(..., id, ...) && false)" (see DecisionRewriter)
+    private static int? MarkedDecisionId(SyntaxNode node)
+    {
+        if (node is BinaryExpressionSyntax { RawKind: (int)SyntaxKind.LogicalOrExpression } or &&
+            or.Right is BinaryExpressionSyntax { RawKind: (int)SyntaxKind.LogicalAndExpression, Left: InvocationExpressionSyntax marker } &&
+            marker.Expression.ToString().StartsWith("global::TarpGen.McDc.", StringComparison.Ordinal) &&
+            marker.ArgumentList.Arguments.Count > 1 &&
+            int.TryParse(marker.ArgumentList.Arguments[1].ToString(), System.Globalization.CultureInfo.InvariantCulture, out var id))
+        {
+            return id;
+        }
+        return null;
+    }
 
     private static (string, int, string) ErrorKey(Diagnostic d)
     {

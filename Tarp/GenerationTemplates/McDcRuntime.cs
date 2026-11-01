@@ -11,16 +11,17 @@ namespace TarpGen
         private const string ModuleId = "__TARP_MODULE_ID__";
         private const string DefaultHitsDirectory = @"__TARP_HITS_DIR__";
 
-        private struct Frame
+        /*
+         * One evaluation of a decision in progress. It is a local of the instrumented code (declared
+         * by the first condition's marker with "out var", passed to the others by ref), so it lives
+         * wherever the evaluation does: across an await, on any thread, in a recursive call.
+         */
+        internal struct Frame
         {
             public int Id;
             public uint Evaluated;
             public uint Values;
         }
-
-        // decisions nest (a condition may contain a decision), so the evaluations in progress form a stack
-        [System.ThreadStatic] private static Frame[] _frames;
-        [System.ThreadStatic] private static int _depth;
 
         // key: decision id (31 bits) | evaluated (16) | values (16) | outcome (1)
         private static readonly System.Collections.Concurrent.ConcurrentDictionary<ulong, byte> _hits =
@@ -32,44 +33,65 @@ namespace TarpGen
             System.AppDomain.CurrentDomain.DomainUnload += (s, e) => Dump();
         }
 
-        public static int Begin(int id)
+        /*
+         * The markers, one per condition (see Tarp.McDc.DecisionRewriter): Yes returns true, No returns
+         * false, both record the condition's value. "0" markers belong to the first condition and start
+         * the evaluation. done: 0 if this value doesn't complete the decision, else 1 + the outcome.
+         */
+        public static bool Yes0(out Frame f, int id, bool value, int done)
         {
-            if (_frames == null)
-            {
-                _frames = new Frame[16];
-            }
-            else if (_depth == _frames.Length)
-            {
-                System.Array.Resize(ref _frames, _frames.Length * 2);
-            }
-            _frames[_depth] = new Frame { Id = id };
-            return _depth++;
+            Start(out f, id, value, done);
+            return true;
         }
 
-        public static bool C(int id, int index, bool value)
+        public static bool No0(out Frame f, int id, bool value, int done)
         {
-            if (_depth > 0 && _frames[_depth - 1].Id == id)
-            {
-                _frames[_depth - 1].Evaluated |= 1u << index;
-                if (value)
-                {
-                    _frames[_depth - 1].Values |= 1u << index;
-                }
-            }
-            return value;
+            Start(out f, id, value, done);
+            return false;
         }
 
-        public static bool End(int token, bool outcome)
+        public static bool Yes(ref Frame f, int id, int index, bool value, int done)
         {
-            // frames above the token were left behind by conditions that threw: drop them
-            if (token < _depth)
+            Mark(ref f, id, index, value, done);
+            return true;
+        }
+
+        public static bool No(ref Frame f, int id, int index, bool value, int done)
+        {
+            Mark(ref f, id, index, value, done);
+            return false;
+        }
+
+        private static void Start(out Frame f, int id, bool value, int done)
+        {
+            f = new Frame { Id = id, Evaluated = 1u, Values = value ? 1u : 0u };
+            if (done != 0)
             {
-                var f = _frames[token];
-                var key = ((ulong)(uint)f.Id << 33) | ((ulong)f.Evaluated << 17) | ((ulong)f.Values << 1) | (outcome ? 1ul : 0ul);
-                _hits.TryAdd(key, 0);
-                _depth = token;
+                Record(f, done == 2);
             }
-            return outcome;
+        }
+
+        private static void Mark(ref Frame f, int id, int index, bool value, int done)
+        {
+            if (f.Id != id)
+            {
+                return;
+            }
+            f.Evaluated |= 1u << index;
+            if (value)
+            {
+                f.Values |= 1u << index;
+            }
+            if (done != 0)
+            {
+                Record(f, done == 2);
+            }
+        }
+
+        private static void Record(Frame f, bool outcome)
+        {
+            var key = ((ulong)(uint)f.Id << 33) | ((ulong)f.Evaluated << 17) | ((ulong)f.Values << 1) | (outcome ? 1ul : 0ul);
+            _hits.TryAdd(key, 0);
         }
 
         // the hits file format, also used by the tests to read the hits without a file

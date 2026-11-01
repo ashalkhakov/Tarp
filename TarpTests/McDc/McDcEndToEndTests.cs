@@ -47,8 +47,11 @@ public class McDcEndToEndTests
         public DecisionResult Result(string decisionText) =>
             Results().Single(r => r.Decision.Text == decisionText);
 
-        private static object? Call(Assembly assembly, string method, object?[] args) =>
-            assembly.GetType("T")!.GetMethod(method)!.Invoke(null, args);
+        private static object? Call(Assembly assembly, string method, object?[] args)
+        {
+            var result = assembly.GetType("T")!.GetMethod(method)!.Invoke(null, args);
+            return result is Task<bool> task ? task.GetAwaiter().GetResult() : result;
+        }
     }
 
     private static readonly MetadataReference[] References =
@@ -273,12 +276,95 @@ public static class T
         ShouldBeShown(p.Result("a && xs.Any(x => x > 0 && x < 10)"), "a=T", "a=F", "xs.Any(x => x > 0 && x < 10)=T");
         ShouldBeShown(p.Result("x > 0 && x < 10"), "x > 0=T", "x < 10=T", "x < 10=F");
         ShouldBeCovered(p.Result("!int.TryParse(t, out var n)"));
+        ShouldBeShown(p.Result("o is string s && s.Length > 0"), "o is string s=T", "s.Length > 0=T");
 
         p.Map.Skipped.Select(s => (s.Text, s.Reason)).Should().BeEquivalentTo(new[]
         {
-            ("o is string s && s.Length > 0", "declares pattern variables"),
             ("true", "constant decision")
         });
+    }
+
+    // what the compiler knows after each condition must survive the markers (see DecisionRewriter)
+    private const string FlowSensitive = @"
+using System;
+using System.Threading.Tasks;
+public class Base { public Base(bool b) { B = b; } public bool B; }
+public class Derived : Base { public Derived(bool a, bool b) : base(a && b) { } }
+public class Primary(bool a, bool b) : Base(a || b) { }
+public static class T
+{
+    static readonly bool Field = Id(true) && Id(false);
+    static bool Id(bool x) => x;
+    public static bool FieldValue() => Field;
+
+    public static int WhenTrue(object o) { if (o is string s && s.Length > 0) return s.Length; return -1; }
+    public static int WhenFalse(object o) { if (o is not string s || s.Length == 0) return -1; return s.Length; }
+    public static int Later(bool a, string t) { if (a && int.TryParse(t, out var n)) return n; return -1; }
+
+    public static async Task<bool> Await(bool a, bool b) => a && await Yielding(b);
+    static async Task<bool> Yielding(bool b) { await Task.Yield(); return b; }
+
+    public static int Recursive(int n) => n > 0 && Recursive(n - 1) >= 0 ? n : 0;
+    public static bool Throws(bool a, bool b) => a && (b ? throw new InvalidOperationException() : true);
+
+    public static bool Constructor(bool a, bool b) => new Derived(a, b).B;
+    public static bool PrimaryConstructor(bool a, bool b) => new Primary(a, b).B;
+}";
+
+    [TestMethod]
+    public void PatternVariablesAssignmentsAndAwait()
+    {
+        var p = Build(FlowSensitive);
+        foreach (var o in new object[] { "abc", "", 1 })
+        {
+            p.Check("WhenTrue", o);
+            p.Check("WhenFalse", o);
+        }
+        p.Check("Later", true, "12");
+        p.Check("Later", true, "x");
+        p.Check("Later", false, "1");
+        p.Check("Await", true, true);
+        p.Check("Await", true, false);
+        p.Check("Await", false, true);
+
+        p.Map.Skipped.Should().BeEmpty();
+        ShouldBeCovered(p.Result("o is string s && s.Length > 0"));
+        ShouldBeCovered(p.Result("o is not string s || s.Length == 0"));
+        ShouldBeCovered(p.Result("a && int.TryParse(t, out var n)"));
+        ShouldBeCovered(p.Result("a && await Yielding(b)"));
+    }
+
+    [TestMethod]
+    public void RecursionAndExceptionsKeepEvaluationsApart()
+    {
+        var p = Build(FlowSensitive);
+        p.Check("Recursive", 2);
+
+        // the evaluation that throws is never recorded, and doesn't disturb the next ones
+        var throws = () => p.Run("Throws", true, true);
+        throws.Should().Throw<TargetInvocationException>().WithInnerException<InvalidOperationException>();
+        p.Check("Throws", true, false);
+        p.Check("Throws", false, true);
+
+        var recursive = p.Result("n > 0 && Recursive(n - 1) >= 0");
+        recursive.Evaluations.Select(h => (h.Evaluated, h.Values)).Should().BeEquivalentTo(new[] { (3u, 3u), (1u, 0u) });
+
+        var outer = p.Result("a && (b ? throw new InvalidOperationException() : true)");
+        outer.Evaluations.Select(h => (h.Evaluated, h.Values)).Should().BeEquivalentTo(new[] { (3u, 3u), (1u, 0u) });
+    }
+
+    [TestMethod]
+    public void InitializersAndConstructorArguments()
+    {
+        var p = Build(FlowSensitive);
+        p.Check("FieldValue");
+        p.Check("Constructor", true, false);
+        p.Check("PrimaryConstructor", false, false);
+
+        // a single evaluation each: in "true && false", the false right side masks the left one
+        ShouldBeShown(p.Result("Id(true) && Id(false)"), "Id(false)=F");
+        ShouldBeShown(p.Result("a && b"), "b=F");
+        ShouldBeShown(p.Result("a || b"), "a=F", "b=F");
     }
 
     [TestMethod]

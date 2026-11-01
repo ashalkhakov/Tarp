@@ -13,7 +13,8 @@ if [ $# -ge 1 ]; then
     nupkg=$(cd "$1" && pwd)
 else
     nupkg="$work/nupkg"
-    dotnet pack "$repo/Tarp.BuildTool" -c Release -o "$nupkg" -p:Version=0.0.0-e2e
+    # a version of its own: NuGet would install a package of the same version from its cache
+    dotnet pack "$repo/Tarp.BuildTool" -c Release -o "$nupkg" -p:Version=0.0.0-e2e.$(date +%s)
 fi
 version=$(ls "$nupkg" | sed -n 's/^dotnet-tarp\.\(.*\)\.nupkg$/\1/p' | head -1)
 
@@ -26,10 +27,12 @@ dotnet tool install dotnet-tarp --add-source "$nupkg" --version "$version"
 dotnet tarp test --tarp-report report.txt
 cat report.txt
 
-grep -F "Summary: 4 decisions (1 never executed), 4/9 conditions shown (44.4%), 1 decisions not instrumented" report.txt
+grep -F "Summary: 5 decisions (0 never executed), 5/11 conditions shown (45.5%), 0 decisions not instrumented" report.txt
 grep -F "c0 paid: NOT shown, missing false" report.txt
 grep -F "try: c0=F c1=- c2=F" report.txt
-grep -F "o is string s && s.Length > 0  (declares pattern variables)" report.txt
+# a decision with a pattern variable, used in the condition after it
+grep -F "c0 o is string s: shown" report.txt
+grep -F "c1 s.Length > 0: NOT shown, missing false" report.txt
 
 # a normal build afterwards compiles the original sources again
 dotnet build
