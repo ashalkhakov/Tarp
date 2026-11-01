@@ -342,7 +342,8 @@ public class McDcBuildInstrumenter
     private static bool IsGenerated(McDcBuildRequest request, string fullPath, string text)
     {
         if (request.IntermediateDirectory.Length > 0 &&
-            fullPath.StartsWith(Path.GetFullPath(request.IntermediateDirectory), StringComparison.OrdinalIgnoreCase))
+            // normalized: on Windows, either may mix / and \
+            Path.GetFullPath(fullPath).StartsWith(Path.GetFullPath(request.IntermediateDirectory), StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
