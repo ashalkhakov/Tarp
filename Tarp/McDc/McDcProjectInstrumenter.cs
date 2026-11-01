@@ -20,7 +20,6 @@ namespace Tarp.McDc;
  */
 public class McDcProjectInstrumenter
 {
-    public const string MapFileName = "tarp-mcdc-map.json";
     public const string HitsDirectoryName = "tarp-hits";
 
     private readonly IFileSystem fileSystem;
@@ -81,7 +80,8 @@ public class McDcProjectInstrumenter
             fileSystem.Path.Combine(outputDir, McDcRuntimeSource.FileName),
             McDcRuntimeSource.Generate(map.ModuleId, fileSystem.Path.Combine(outputDir, HitsDirectoryName)));
 
-        fileSystem.File.WriteAllText(fileSystem.Path.Combine(outputDir, MapFileName), map.ToJson());
+        var mapFileName = fileSystem.Path.GetFileNameWithoutExtension(project.FilePath!) + McDcMap.FileSuffix;
+        fileSystem.File.WriteAllText(fileSystem.Path.Combine(outputDir, mapFileName), map.ToJson());
 
         fileSystem.File.Copy(project.FilePath!, fileSystem.Path.Combine(outputDir, fileSystem.Path.GetFileName(project.FilePath!)), overwrite: true);
 
@@ -99,8 +99,8 @@ public class McDcProjectInstrumenter
      */
     public static CompilationUnitSyntax WithPrologue(CompilationUnitSyntax root, string originalPath)
     {
-        var path = originalPath.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal);
-        var prologue = SyntaxFactory.ParseLeadingTrivia($"#pragma warning disable\n#line 1 \"{path}\"\n");
+        // the file name isn't an escaped string: Razor writes #line "C:\dir\file.cshtml" too
+        var prologue = SyntaxFactory.ParseLeadingTrivia($"#pragma warning disable\n#line 1 \"{originalPath}\"\n");
 
         var first = root.GetFirstToken(includeZeroWidth: true);
         return root.ReplaceToken(first, first.WithLeadingTrivia(prologue.AddRange(first.LeadingTrivia)));

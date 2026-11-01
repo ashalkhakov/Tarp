@@ -6,9 +6,16 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
 	<PackAsTool>true</PackAsTool>
-	<ToolCommandName>tarp-buildtool</ToolCommandName>
+	<!-- dotnet-tarp: run as "dotnet tarp" -->
+	<ToolCommandName>dotnet-tarp</ToolCommandName>
 	<PackageOutputPath>./nupkg</PackageOutputPath>
+	<!-- run on whatever (newer) runtime the build machine has -->
+	<RollForward>Major</RollForward>
   </PropertyGroup>
+
+  <ItemGroup>
+	<None Include="Tarp.targets" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Tarp\Tarp.csproj" />

@@ -38,22 +38,51 @@ public sealed class DecisionRewriter : CSharpSyntaxRewriter
     private readonly SemanticModel _model;
     private readonly McDcMap _map;
     private readonly string _displayPath;
+    // decisions not to instrument, by the start of their span, with the reason
+    private readonly IReadOnlyDictionary<int, string> _excluded;
 
-    public DecisionRewriter(SemanticModel model, McDcMap map, string displayPath)
+    public DecisionRewriter(SemanticModel model, McDcMap map, string displayPath, IReadOnlyDictionary<int, string>? excluded = null)
         : base(visitIntoStructuredTrivia: false)
     {
         _model = model;
         _map = map;
         _displayPath = displayPath;
+        _excluded = excluded ?? new Dictionary<int, string>();
     }
 
     public override SyntaxNode? Visit(SyntaxNode? node)
     {
-        if (node is ExpressionSyntax e && IsDecisionRoot(e))
+        if (node is ExpressionSyntax e && IsDecisionRoot(e) && !IsExcludedFromCoverage(e))
         {
             return InstrumentDecision(e);
         }
         return base.Visit(node);
+    }
+
+    private readonly Dictionary<SyntaxNode, bool> _excludedMembers = new();
+
+    // [ExcludeFromCodeCoverage] on the member, accessor, local function or type the decision is in
+    private bool IsExcludedFromCoverage(ExpressionSyntax e)
+    {
+        foreach (var a in e.Ancestors())
+        {
+            if (a is not (MemberDeclarationSyntax or AccessorDeclarationSyntax or LocalFunctionStatementSyntax))
+            {
+                continue;
+            }
+            if (!_excludedMembers.TryGetValue(a, out var excluded))
+            {
+                var symbol = _model.GetDeclaredSymbol(a);
+                excluded = symbol != null && symbol.GetAttributes().Any(x =>
+                    x.AttributeClass?.ToDisplayString() == "System.Diagnostics.CodeAnalysis.ExcludeFromCodeCoverageAttribute");
+                _excludedMembers[a] = excluded;
+            }
+            if (excluded)
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static bool IsDecisionRoot(ExpressionSyntax e)
@@ -82,7 +111,7 @@ public sealed class DecisionRewriter : CSharpSyntaxRewriter
         DecisionTree.Build(e, conditions);
 
         var lineSpan = e.GetLocation().GetLineSpan().StartLinePosition;
-        var reason = WhyNotInstrumentable(e, conditions);
+        var reason = _excluded.TryGetValue(e.SpanStart, out var excludedReason) ? excludedReason : WhyNotInstrumentable(e, conditions);
         if (reason != null)
         {
             _map.Skipped.Add(new SkippedDecision
@@ -90,6 +119,7 @@ public sealed class DecisionRewriter : CSharpSyntaxRewriter
                 File = _displayPath,
                 Line = lineSpan.Line + 1,
                 Column = lineSpan.Character + 1,
+                SpanStart = e.SpanStart,
                 Text = e.ToString(),
                 Reason = reason
             });
@@ -104,6 +134,7 @@ public sealed class DecisionRewriter : CSharpSyntaxRewriter
             File = _displayPath,
             Line = lineSpan.Line + 1,
             Column = lineSpan.Character + 1,
+            SpanStart = e.SpanStart,
             Text = e.ToString(),
             Conditions = conditions.Select(c => c.ToString()).ToList()
         });
@@ -189,6 +220,7 @@ public sealed class DecisionRewriter : CSharpSyntaxRewriter
         }
         foreach (var c in conditions)
         {
+            // also skips dynamic conditions: their converted type is dynamic
             if (_model.GetTypeInfo(c).ConvertedType?.SpecialType != SpecialType.System_Boolean)
             {
                 return "a condition is not a bool";

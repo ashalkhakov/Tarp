@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Text;
 
@@ -14,11 +15,35 @@ public static class McDcReport
         return map.Decisions.Select(d => McDcAnalyzer.Analyze(d, all)).ToList();
     }
 
-    public static string Format(McDcMap map, IReadOnlyList<DecisionResult> results)
+    /*
+     * Loads every map (*.map.json) in a directory, and the hits (*.hits) under it or in hitsDirectory:
+     * the results directory of `dotnet tarp test`, or the output directory of mcdc-instrument.
+     */
+    public static List<(McDcMap Map, List<DecisionResult> Results)> AnalyzeDirectory(string directory, string? hitsDirectory = null)
+    {
+        var maps = Directory.EnumerateFiles(directory, "*" + McDcMap.FileSuffix)
+            .OrderBy(p => p, StringComparer.Ordinal)
+            .Select(p => McDcMap.FromJson(File.ReadAllText(p)))
+            .ToList();
+
+        var hitFiles = Directory.EnumerateFiles(hitsDirectory ?? directory, "*.hits", SearchOption.AllDirectories).ToList();
+
+        return maps
+            .Select(m => (m, Analyze(m, hitFiles.SelectMany(f => McDcHits.Parse(File.ReadAllText(f), m.ModuleId)).Distinct())))
+            .ToList();
+    }
+
+    public static string Format(McDcMap map, IReadOnlyList<DecisionResult> results) =>
+        Format(new List<(McDcMap, List<DecisionResult>)> { (map, results.ToList()) });
+
+    public static string Format(IReadOnlyList<(McDcMap Map, List<DecisionResult> Results)> modules)
     {
         var sb = new StringBuilder();
         sb.AppendLine("Tarp MC/DC report (masking MC/DC)");
         sb.AppendLine();
+
+        var results = modules.SelectMany(m => m.Results).ToList();
+        var skipped = modules.SelectMany(m => m.Map.Skipped).ToList();
 
         foreach (var r in results)
         {
@@ -31,13 +56,13 @@ public static class McDcReport
         var percent = conditions.Count == 0 ? 100.0 : 100.0 * shown / conditions.Count;
 
         sb.AppendLine(CultureInfo.InvariantCulture,
-            $"Summary: {results.Count} decisions ({notExecuted} never executed), {shown}/{conditions.Count} conditions shown ({percent:0.0}%), {map.Skipped.Count} decisions not instrumented");
+            $"Summary: {results.Count} decisions ({notExecuted} never executed), {shown}/{conditions.Count} conditions shown ({percent:0.0}%), {skipped.Count} decisions not instrumented");
 
-        if (map.Skipped.Count > 0)
+        if (skipped.Count > 0)
         {
             sb.AppendLine();
             sb.AppendLine("Not instrumented:");
-            foreach (var s in map.Skipped)
+            foreach (var s in skipped)
             {
                 sb.AppendLine(CultureInfo.InvariantCulture, $"  {s.File}:{s.Line}:{s.Column}  {OneLine(s.Text)}  ({s.Reason})");
             }
