@@ -24,8 +24,11 @@ public class Instrument1
         r++;
         r *= 2;
 
+        // labels on purpose: a sample of labeled statements, nothing jumps to them
+#pragma warning disable CS0164
         lab1:
         lab2: r += 3;
+#pragma warning restore CS0164
 
         return r;
     }

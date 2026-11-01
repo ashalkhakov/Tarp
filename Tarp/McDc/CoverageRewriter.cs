@@ -789,7 +789,7 @@ public sealed class CoverageRewriter : DecisionRewriter
         }
         try
         {
-            return Model.AnalyzeControlFlow(body).EndPointIsReachable;
+            return Model.AnalyzeControlFlow(body)?.EndPointIsReachable ?? true;
         }
         catch (ArgumentException)
         {

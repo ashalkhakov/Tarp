@@ -1,0 +1,10 @@
+root = true
+
+# Analyzer rules that don't fit Tarp (the code analysis level is 6.0-all, see Tarp/Tarp.csproj)
+[*.cs]
+# with nullable reference types on, the compiler already checks arguments for null
+dotnet_diagnostic.CA1062.severity = none
+# Tarp isn't a library for others to build on: its types may expose List<T>
+dotnet_diagnostic.CA1002.severity = none
+# the map is (de)serialized as JSON, so its collections have setters
+dotnet_diagnostic.CA2227.severity = none

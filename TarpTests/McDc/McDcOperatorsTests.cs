@@ -22,7 +22,7 @@ public class McDcOperatorsTests
         {
             var leaves = new List<ExpressionSyntax>();
             var tree = DecisionTree.Parse(shape, leaves, allOperators: true);
-            var markers = new McDcFunctions().CreateMarkers(tree);
+            var markers = McDcFunctions.CreateMarkers(tree);
             for (uint input = 0; input < 1u << leaves.Count; input++)
             {
                 uint evaluated = 0;

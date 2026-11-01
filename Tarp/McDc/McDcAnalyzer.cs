@@ -129,7 +129,7 @@ public static class McDcAnalyzer
 
         // && || !: McDcFunctions' monitor; with & | ^ == != ?: too, masking computed directly
         var classic = DecisionTree.IsClassic(tree);
-        var markers = classic ? new McDcFunctions().CreateMarkers(tree) : null;
+        var markers = classic ? McDcFunctions.CreateMarkers(tree) : null;
         Func<uint, uint, int> shown = classic
             ? (evaluated, values) => Monitor(markers!, evaluated, values)
             : (evaluated, values) => DecisionTree.Shown(tree, evaluated, values);

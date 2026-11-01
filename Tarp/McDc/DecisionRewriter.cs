@@ -311,7 +311,7 @@ public class DecisionRewriter : CSharpSyntaxRewriter
         // otherwise (& | ^ == != ?:) every marker records the evaluation so far, and the report keeps
         // the complete ones (see McDcAnalyzer)
         var tree = DecisionTree.Parse(shape, new List<ExpressionSyntax>(), allOperators: true);
-        var markers = DecisionTree.IsClassic(tree) ? new McDcFunctions().CreateMarkers(tree) : null;
+        var markers = DecisionTree.IsClassic(tree) ? McDcFunctions.CreateMarkers(tree) : null;
         var index = 0;
         return Rewrite(e, id, markers, ref index);
     }

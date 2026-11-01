@@ -20,9 +20,4 @@
     <ProjectReference Include="..\TarpTestApp\TarpTestApp.csproj" />
     <ProjectReference Include="..\Tarp\Tarp.csproj" />
   </ItemGroup>
-  <ItemGroup>
-    <Compile Update="TestSources\NewVariablesAtReturns.cs">
-      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
-    </Compile>
-  </ItemGroup>
 </Project>

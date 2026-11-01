@@ -14,7 +14,7 @@ namespace Tarp.McDc;
  * Instruments a project for MC/DC: writes a mirror of the project (rewritten sources, the project
  * file, the runtime) to the output directory, plus the map the report needs.
  *
- * NOTE: like TarpPreprocessor, it copies the project file as is, so it works for SDK-style projects
+ * NOTE: it copies the project file as is, so it works for SDK-style projects
  * whose sources live under the project directory; project references and linked files don't resolve
  * from the mirror yet.
  */

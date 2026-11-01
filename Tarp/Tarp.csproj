@@ -7,7 +7,6 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Macross.Json.Extensions" Version="3.0.0" />
     <PackageReference Include="McMaster.Extensions.CommandLineUtils" Version="4.1.1" />
     <PackageReference Include="Microsoft.Build.Locator" Version="1.7.8" />
     <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0" PrivateAssets="all" />
@@ -16,9 +15,6 @@
     <PackageReference Include="TestableIO.System.IO.Abstractions.Wrappers" Version="21.1.7" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Update="GenerationTemplates\GeneratedCodeTemplate.cs">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Compile>
     <!-- the MC/DC runtime is compiled into the instrumented assembly, not into Tarp -->
     <Compile Remove="GenerationTemplates\McDcRuntime.cs" />
     <EmbeddedResource Include="GenerationTemplates\McDcRuntime.cs" LogicalName="Tarp.McDcRuntime.cs" />

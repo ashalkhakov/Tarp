@@ -137,7 +137,7 @@ public static class DecisionTree
             SyntaxKind.LogicalNotExpression => !c[0],
             SyntaxKind.LogicalAndExpression => c[0] == false ? false : c[1],
             SyntaxKind.LogicalOrExpression => c[0] == true ? true : c[1],
-            SyntaxKind.ConditionalExpression => c[0] == null ? null : c[0].Value ? c[1] : c[2],
+            SyntaxKind.ConditionalExpression => c[0] == null ? null : c[0] == true ? c[1] : c[2],
             SyntaxKind.BitwiseAndExpression => c[0] & c[1],
             SyntaxKind.BitwiseOrExpression => c[0] | c[1],
             SyntaxKind.ExclusiveOrExpression => c[0] ^ c[1],
