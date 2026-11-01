@@ -289,7 +289,7 @@ public class McDcBuildInstrumenter
             added.Add(path);
         }
 
-        var runtimePath = Path.Combine(request.OutputDirectory, McDcRuntimeSource.FileName);
+        var runtimePath = Path.GetFullPath(Path.Combine(request.OutputDirectory, McDcRuntimeSource.FileName));
         WriteIfChanged(runtimePath, McDcRuntimeSource.Generate(map.ModuleId, request.ResultsDirectory));
         added.Add(runtimePath);
 
@@ -321,7 +321,8 @@ public class McDcBuildInstrumenter
             var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(fullPath)))[..8];
             relative = Path.Combine("_linked", hash + "_" + Path.GetFileName(fullPath));
         }
-        return Path.Combine(request.OutputDirectory, "src", relative);
+        // normalized: MSBuild compares the Compile items it reads back from instrumented.txt
+        return Path.GetFullPath(Path.Combine(request.OutputDirectory, "src", relative));
     }
 
     private static string DisplayPath(McDcBuildRequest request, string fullPath)

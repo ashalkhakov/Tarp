@@ -55,7 +55,7 @@ public class McDcBuildInstrumenterTests
     private static McDcMap Instrument(McDcBuildRequest request, StringWriter? log = null) =>
         new McDcBuildInstrumenter(new FileSystem(), log ?? new StringWriter()).Instrument(request);
 
-    private string Output(string name) => Path.Combine(_project, "obj", "Debug", "tarp", name);
+    private string Output(string name) => Path.GetFullPath(Path.Combine(_project, "obj", "Debug", "tarp", name));
 
     private const string Rules = @"
 using System.Diagnostics.CodeAnalysis;
