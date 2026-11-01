@@ -1,0 +1,42 @@
+name: Release
+
+# push a tag like v0.1.0 to release: the version comes from the tag
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Version from the tag
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      - run: dotnet test TarpTests -c Release --filter "FullyQualifiedName!~TarpTests.Cfg"
+
+      - run: dotnet pack Tarp.BuildTool -c Release -o nupkg -p:Version=$VERSION
+
+      - name: Check the package end to end
+        run: bash samples/e2e.sh nupkg
+
+      - name: GitHub release with the package
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" nupkg/*.nupkg --title "$GITHUB_REF_NAME" --generate-notes
+
+      # only when the repository has a NUGET_API_KEY secret: nuget.org packages are public
+      - name: Publish to nuget.org
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        if: env.NUGET_API_KEY != ''
+        run: dotnet nuget push nupkg/*.nupkg --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
