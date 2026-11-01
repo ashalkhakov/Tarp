@@ -118,6 +118,9 @@ public class DecisionRewriter : CSharpSyntaxRewriter
         DoStatementSyntax s => s.Condition == e,
         ForStatementSyntax s => s.Condition == e,
         ConditionalExpressionSyntax c => c.Condition == e,
+        // case ... when c:, arm when c =>, catch (...) when (c)
+        WhenClauseSyntax w => w.Condition == e,
+        CatchFilterClauseSyntax f => f.FilterExpression == e,
         _ => false
     };
 
@@ -281,7 +284,11 @@ public class DecisionRewriter : CSharpSyntaxRewriter
         return null;
     }
 
-    private bool IsExpressionTree(AnonymousFunctionExpressionSyntax f)
+    // in a lambda that becomes an expression tree, or a query (which may be one): no calls to the runtime there
+    protected bool IsInExpressionTree(SyntaxNode node) =>
+        node.AncestorsAndSelf().Any(a => a is QueryExpressionSyntax || a is AnonymousFunctionExpressionSyntax f && IsExpressionTree(f));
+
+    protected bool IsExpressionTree(AnonymousFunctionExpressionSyntax f)
     {
         var type = _model.GetTypeInfo(f).ConvertedType;
         return type?.OriginalDefinition.ToDisplayString() == "System.Linq.Expressions.Expression<TDelegate>";

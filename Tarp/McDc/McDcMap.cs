@@ -58,6 +58,8 @@ public class ProbeEntry
     public const string EmptyBlock = "empty-block";
     // the default section Tarp adds to a switch that has none: no case matched
     public const string NoCaseMatched = "no-case-matched";
+    // a branch that isn't a line of its own, e.g. a side of ??
+    public const string Branch = "branch";
 
     public int Id { get; set; }
     public string File { get; set; } = "";
@@ -78,9 +80,15 @@ public class FunctionEntry
     public List<int> Exits { get; set; } = new();
 }
 
+// a branch point with more than two ways: a switch statement or expression, or a ??
 public class SwitchEntry
 {
+    public const string Statement = "switch";
+    public const string Expression = "switch expression";
+    public const string Coalesce = "??";
+
     public int Id { get; set; }
+    public string Kind { get; set; } = Statement;
     public string File { get; set; } = "";
     public int Line { get; set; }
     // per section: its labels, and the probe of its first statement

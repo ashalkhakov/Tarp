@@ -24,15 +24,20 @@ namespace Tarp.McDc;
  *   body when it can be reached (a probe there). Expression bodies become block bodies, to have
  *   somewhere to put the probe: "=> e" is "{ P(id); return e; }" (or "e;", or "throw ...;").
  * - A switch statement's branches are its sections; one with no default gets "default: P(id); break;",
- *   for "no case matched". Branches of decisions are their outcomes (see McDcReport).
- * - Lambdas: their block bodies get probes, but they aren't counted as functions; expression bodies
- *   aren't probed (their line counts with the statement they are in).
+ *   for "no case matched". A switch expression's are its arms: "when PT(id)" (or "when (c) && PT(id)")
+ *   runs the probe when the arm is taken. A ??'s are its sides: PN(id, left) ?? PV(id, right).
+ *   Branches of decisions are their outcomes (see McDcReport).
+ * - Where there's no room for a statement, probes go in expressions, keeping what the compiler knows:
+ *   do { } while (PF(id) && false || (c)); field and property initializers: = PV<Type>(id, value).
+ * - Lambdas: probes in their bodies (an expression body becomes a block body, unless the lambda is
+ *   an expression tree), but they aren't counted as functions.
  *
  * Nothing here adds a line break, so line numbers (and #line) stay right.
  */
 public sealed class CoverageRewriter : DecisionRewriter
 {
-    private const string ProbeMethod = "global::TarpGen.McDc.P";
+    private const string Runtime = "global::TarpGen.McDc";
+    private const string ProbeMethod = Runtime + ".P";
 
     // the function whose body is being visited; null in a lambda, whose returns aren't the function's exits
     private readonly Stack<FunctionEntry?> _functions = new();
@@ -244,21 +249,180 @@ public sealed class CoverageRewriter : DecisionRewriter
 
     // lambdas: probes in block bodies, but not functions of their own
     public override SyntaxNode? VisitParenthesizedLambdaExpression(ParenthesizedLambdaExpressionSyntax node) =>
-        InLambda(() => base.VisitParenthesizedLambdaExpression(node));
+        InLambda(node, () => base.VisitParenthesizedLambdaExpression(node));
 
     public override SyntaxNode? VisitSimpleLambdaExpression(SimpleLambdaExpressionSyntax node) =>
-        InLambda(() => base.VisitSimpleLambdaExpression(node));
+        InLambda(node, () => base.VisitSimpleLambdaExpression(node));
 
     public override SyntaxNode? VisitAnonymousMethodExpression(AnonymousMethodExpressionSyntax node) =>
-        InLambda(() => base.VisitAnonymousMethodExpression(node));
+        InLambda(node, () => base.VisitAnonymousMethodExpression(node));
 
-    private SyntaxNode? InLambda(Func<SyntaxNode?> visit)
+    // x => e  ->  x => { P(id); return e; }
+    private SyntaxNode? InLambda(AnonymousFunctionExpressionSyntax node, Func<SyntaxNode?> visit)
     {
         _functions.Push(null);
         var result = visit();
         _functions.Pop();
-        return result;
+
+        if (node.ExpressionBody is not { } body || result is not AnonymousFunctionExpressionSyntax lambda || lambda.ExpressionBody is not { } rewritten ||
+            IsExcludedFromCoverage(node) || IsInExpressionTree(node) || Model.GetSymbolInfo(node).Symbol is not IMethodSymbol method)
+        {
+            return result;
+        }
+
+        var id = NewProbe(node, body.Span, ProbeEntry.Statement);
+        var block = Block(List(new[] { ProbeStatement(id).WithTrailingTrivia(Space), StatementFor(rewritten, ReturnsValue(method)).WithTrailingTrivia(Space) }))
+            .WithOpenBraceToken(Token(SyntaxKind.OpenBraceToken).WithLeadingTrivia(rewritten.GetLeadingTrivia()).WithTrailingTrivia(Space))
+            .WithCloseBraceToken(Token(SyntaxKind.CloseBraceToken).WithTrailingTrivia(rewritten.GetTrailingTrivia()));
+        return lambda.WithExpressionBody(null).WithBlock(block);
     }
+
+    // the statement for an expression body: return e; or e; (or throw ...;)
+    private static StatementSyntax StatementFor(ExpressionSyntax e, bool returnsValue) => e is ThrowExpressionSyntax t
+        ? ThrowStatement(Token(SyntaxKind.ThrowKeyword).WithTrailingTrivia(Space), t.Expression.WithoutTrivia(), Token(SyntaxKind.SemicolonToken))
+        : returnsValue
+            ? ReturnStatement(Token(SyntaxKind.ReturnKeyword).WithTrailingTrivia(Space), e.WithoutTrivia(), Token(SyntaxKind.SemicolonToken))
+            : ExpressionStatement(e.WithoutTrivia());
+
+    // do { } while (c);  ->  do { } while (PF(id) && false || (c));  "&& false": what the compiler knows after c stays
+    public override SyntaxNode? VisitDoStatement(DoStatementSyntax node)
+    {
+        var rewritten = (DoStatementSyntax)base.VisitDoStatement(node)!;
+        if (IsExcludedFromCoverage(node))
+        {
+            return rewritten;
+        }
+        var id = NewProbe(node, FromTo(node.WhileKeyword, node.CloseParenToken), ProbeEntry.Statement);
+        return rewritten.WithCondition(Probed($"({Runtime}.PF({id}) && false || __tarpValue)", rewritten.Condition));
+    }
+
+    // template with __tarpValue in it, with (value) for it
+    private static ExpressionSyntax Probed(string template, ExpressionSyntax value)
+    {
+        var e = ParseExpression(template);
+        var placeholder = e.DescendantNodes().OfType<IdentifierNameSyntax>().Single(n => n.Identifier.Text == "__tarpValue");
+        return e.ReplaceNode(placeholder, ParenthesizedExpression(value.WithoutTrivia())).WithTriviaFrom(value);
+    }
+
+    // switch expressions: each arm is a branch, and its lines
+    public override SyntaxNode? VisitSwitchExpression(SwitchExpressionSyntax node)
+    {
+        if (IsExcludedFromCoverage(node))
+        {
+            return base.VisitSwitchExpression(node);
+        }
+
+        var entry = new SwitchEntry { Id = Map.Switches.Count, File = DisplayPath, Line = Line(node), Kind = SwitchEntry.Expression };
+        Map.Switches.Add(entry);
+
+        var rewritten = (SwitchExpressionSyntax)base.VisitSwitchExpression(node)!;
+        var arms = new List<SwitchExpressionArmSyntax>();
+        for (var i = 0; i < node.Arms.Count; i++)
+        {
+            var o = node.Arms[i];
+            var a = rewritten.Arms[i];
+            var id = NewProbe(o, o.Span, ProbeEntry.Statement);
+            entry.Labels.Add(o.Pattern + (o.WhenClause != null ? " " + o.WhenClause : ""));
+            entry.Sections.Add(id);
+
+            // the arm's lines are its own (its probe is the innermost), not those of the statement around it
+            var when = a.WhenClause == null
+                ? WhenClause(ParseExpression($"{Runtime}.PT({id})"))
+                    .WithWhenKeyword(Token(SyntaxKind.WhenKeyword).WithLeadingTrivia(Space).WithTrailingTrivia(Space))
+                    .WithTrailingTrivia(a.Pattern.GetTrailingTrivia())
+                : a.WhenClause.WithCondition(Probed($"__tarpValue && {Runtime}.PT({id})", a.WhenClause.Condition));
+            arms.Add(a.WhenClause == null ? a.WithPattern(a.Pattern.WithoutTrailingTrivia()).WithWhenClause(when) : a.WithWhenClause(when));
+        }
+        return rewritten.WithArms(SeparatedList(arms, rewritten.Arms.GetSeparators()));
+    }
+
+    // a ?? b  ->  PN<A>(id, a) ?? PV<B>(id2, b): left not null, right used
+    public override SyntaxNode? VisitBinaryExpression(BinaryExpressionSyntax node)
+    {
+        var result = base.VisitBinaryExpression(node);
+        if (!node.IsKind(SyntaxKind.CoalesceExpression) || result is not BinaryExpressionSyntax rewritten ||
+            node.Right is ThrowExpressionSyntax || IsExcludedFromCoverage(node) || IsInExpressionTree(node) || !CanCallHere(node))
+        {
+            return result;
+        }
+
+        var left = TypeArgument(Model.GetTypeInfo(node.Left).Type);
+        var right = TypeArgument(Model.GetTypeInfo(node.Right).ConvertedType);
+        if (left == null || right == null)
+        {
+            return result;
+        }
+
+        var leftId = NewProbe(node.Left, node.Left.Span, ProbeEntry.Branch);
+        var rightId = NewProbe(node.Right, node.Right.Span, ProbeEntry.Branch);
+        Map.Switches.Add(new SwitchEntry
+        {
+            Id = Map.Switches.Count,
+            File = DisplayPath,
+            Line = Line(node),
+            Kind = SwitchEntry.Coalesce,
+            Labels = { "left side not null", "right side used" },
+            Sections = { leftId, rightId }
+        });
+
+        return rewritten
+            .WithLeft(Probed($"{Runtime}.PN<{left}>({leftId}, __tarpValue)", rewritten.Left))
+            .WithRight(Probed($"{Runtime}.PV<{right}>({rightId}, __tarpValue)", rewritten.Right));
+    }
+
+    // field initializers: = PV<Type>(id, value), so that their lines count
+    public override SyntaxNode? VisitFieldDeclaration(FieldDeclarationSyntax node)
+    {
+        var rewritten = (FieldDeclarationSyntax)base.VisitFieldDeclaration(node)!;
+        if (node.Modifiers.Any(m => m.IsKind(SyntaxKind.ConstKeyword) || m.IsKind(SyntaxKind.FixedKeyword)) ||
+            IsExcludedFromCoverage(node) || TypeArgument(Model.GetTypeInfo(node.Declaration.Type).Type) == null)
+        {
+            return rewritten;
+        }
+
+        var type = node.Declaration.Type.WithoutTrivia().ToString();
+        var variables = new List<VariableDeclaratorSyntax>();
+        for (var i = 0; i < node.Declaration.Variables.Count; i++)
+        {
+            var o = node.Declaration.Variables[i];
+            var v = rewritten.Declaration.Variables[i];
+            // int[] a = { 1, 2 }: an array initializer is no argument
+            if (o.Initializer == null || v.Initializer == null || o.Initializer.Value is InitializerExpressionSyntax)
+            {
+                variables.Add(v);
+                continue;
+            }
+            var id = NewProbe(o, o.Initializer.Value.Span, ProbeEntry.Statement);
+            variables.Add(v.WithInitializer(v.Initializer.WithValue(Probed($"{Runtime}.PV<{type}>({id}, __tarpValue)", v.Initializer.Value))));
+        }
+        return rewritten.WithDeclaration(rewritten.Declaration.WithVariables(SeparatedList(variables, rewritten.Declaration.Variables.GetSeparators())));
+    }
+
+    // a type as a type argument: null when it can't be one, or can't be written (anonymous types)
+    private static string? TypeArgument(ITypeSymbol? type)
+    {
+        static bool Ok(ITypeSymbol t) => t switch
+        {
+            IErrorTypeSymbol or IPointerTypeSymbol or IFunctionPointerTypeSymbol => false,
+            { IsAnonymousType: true } or { IsRefLikeType: true } => false,
+            IArrayTypeSymbol a => Ok(a.ElementType),
+            INamedTypeSymbol n => n.TypeArguments.All(Ok),
+            _ => true
+        };
+
+        if (type == null || !Ok(type))
+        {
+            return null;
+        }
+        return type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat.AddMiscellaneousOptions(SymbolDisplayMiscellaneousOptions.IncludeNullableReferenceTypeModifier));
+    }
+
+    // no calls in attribute arguments, parameter defaults or constants
+    private bool CanCallHere(ExpressionSyntax e) =>
+        !Model.GetConstantValue(e).HasValue &&
+        !e.Ancestors().Any(a => a is AttributeArgumentSyntax || a is EqualsValueClauseSyntax { Parent: ParameterSyntax } ||
+                                a is LocalDeclarationStatementSyntax { IsConst: true } ||
+                                a is FieldDeclarationSyntax f && f.Modifiers.Any(m => m.IsKind(SyntaxKind.ConstKeyword)));
 
     // functions
 
@@ -342,6 +506,19 @@ public sealed class CoverageRewriter : DecisionRewriter
     // int X => e;  ->  int X { get { P(id); return e; } }
     public override SyntaxNode? VisitPropertyDeclaration(PropertyDeclarationSyntax node)
     {
+        if (node.Initializer != null)
+        {
+            // int X { get; } = e;  ->  = PV<int>(id, e);
+            var initialized = (PropertyDeclarationSyntax)base.VisitPropertyDeclaration(node)!;
+            if (IsExcludedFromCoverage(node) || TypeArgument(Model.GetTypeInfo(node.Type).Type) == null || initialized.Initializer == null ||
+                node.Initializer.Value is InitializerExpressionSyntax)
+            {
+                return initialized;
+            }
+            var id = NewProbe(node.Initializer, node.Initializer.Value.Span, ProbeEntry.Statement);
+            return initialized.WithInitializer(initialized.Initializer.WithValue(
+                Probed($"{Runtime}.PV<{node.Type.WithoutTrivia()}>({id}, __tarpValue)", initialized.Initializer.Value)));
+        }
         if (node.ExpressionBody == null || !BeginFunction(node, null, node.ExpressionBody, out var function, ".get"))
         {
             return base.VisitPropertyDeclaration(node);
@@ -441,11 +618,7 @@ public sealed class CoverageRewriter : DecisionRewriter
             function.Exits.Add(id);
 
             var e = arrow.Expression;
-            StatementSyntax statement = e is ThrowExpressionSyntax t
-                ? ThrowStatement(Token(SyntaxKind.ThrowKeyword).WithTrailingTrivia(Space), t.Expression.WithoutLeadingTrivia(), Token(SyntaxKind.SemicolonToken))
-                : returnsValue
-                    ? ReturnStatement(Token(SyntaxKind.ReturnKeyword).WithTrailingTrivia(Space), e.WithoutLeadingTrivia(), Token(SyntaxKind.SemicolonToken))
-                    : ExpressionStatement(e.WithoutLeadingTrivia());
+            var statement = StatementFor(e, returnsValue);
 
             // { keeps what was after =>: a line break there stays a line break
             return Block(List(new[] { ProbeStatement(id).WithLeadingTrivia(e.GetLeadingTrivia()).WithTrailingTrivia(Space), statement.WithTrailingTrivia(Space) }))
@@ -494,12 +667,11 @@ public sealed class CoverageRewriter : DecisionRewriter
         }
     }
 
-    private bool ReturnsValue(SyntaxNode node)
+    private bool ReturnsValue(SyntaxNode node) =>
+        Model.GetDeclaredSymbol(node) is not IMethodSymbol method || ReturnsValue(method);
+
+    private static bool ReturnsValue(IMethodSymbol method)
     {
-        if (Model.GetDeclaredSymbol(node) is not IMethodSymbol method)
-        {
-            return true;
-        }
         if (method.ReturnsVoid)
         {
             return false;

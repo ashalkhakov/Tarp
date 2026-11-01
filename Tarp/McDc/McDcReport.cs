@@ -104,7 +104,7 @@ public static class McDcReport
 
         sb.AppendLine("Summary");
         sb.AppendLine(Row("Lines", lines, ""));
-        sb.AppendLine(Row("Branches", branches, "decision outcomes and switch sections"));
+        sb.AppendLine(Row("Branches", branches, "decision outcomes, switch sections and arms, ?? sides"));
         sb.AppendLine(Row("Functions", functions, $"entered; exits {exits.Item1}/{exits.Item2}"));
         sb.AppendLine(Row("Conditions", seen, "seen both true and false"));
         sb.AppendLine(Row("MC/DC", mcdc, "conditions shown to affect their decision"));
@@ -146,7 +146,13 @@ public static class McDcReport
         {
             if (s.NotTaken.Count > 0)
             {
-                sb.AppendLine(CultureInfo.InvariantCulture, $"  switch at line {s.Switch.Line}: sections not taken: {string.Join("; ", s.NotTaken)}");
+                var what = s.Switch.Kind switch
+                {
+                    SwitchEntry.Expression => "arms",
+                    SwitchEntry.Coalesce => "sides",
+                    _ => "sections"
+                };
+                sb.AppendLine(CultureInfo.InvariantCulture, $"  {s.Switch.Kind} at line {s.Switch.Line}: {what} not taken: {string.Join("; ", s.NotTaken)}");
             }
         }
 

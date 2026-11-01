@@ -42,6 +42,35 @@ namespace TarpGen
             _probes[id] = true;
         }
 
+        // probes inside expressions: (PF(id) && false || (c)) is c, "when PT(id)" is always true,
+        // PV(id, v) is v, PN(id, v) is v and runs the probe when v isn't null
+        public static bool PF(int id)
+        {
+            _probes[id] = true;
+            return false;
+        }
+
+        public static bool PT(int id)
+        {
+            _probes[id] = true;
+            return true;
+        }
+
+        public static T PV<T>(int id, T value)
+        {
+            _probes[id] = true;
+            return value;
+        }
+
+        public static T PN<T>(int id, T value)
+        {
+            if (value != null)
+            {
+                _probes[id] = true;
+            }
+            return value;
+        }
+
         /*
          * The markers, one per condition (see Tarp.McDc.DecisionRewriter): Yes returns true, No returns
          * false, both record the condition's value. "0" markers belong to the first condition and start

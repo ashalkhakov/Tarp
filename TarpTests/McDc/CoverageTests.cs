@@ -149,6 +149,108 @@ public class R
         c.LinesRun.Should().Contain(LineOf("var w = v + 1;"));
     }
 
+    // where there's no room for a statement: probes in expressions
+    private const string Expressions = @"
+using System;
+using System.Collections.Generic;
+public static class T
+{
+    public static int DoWhile(int n)
+    {
+        var i = 0;
+        do
+        {
+            i++;
+        }
+        while (i < n);
+        return i;
+    }
+
+    public static int Lambdas(int n)
+    {
+        Func<int, int> twice = x =>
+            x * 2;
+        Func<int, int> never = x =>
+            x - 1;
+        Action nothing = () => { };
+        nothing();
+        return twice(n);
+    }
+
+    public static string Arms(int x) => x switch
+    {
+        0 => ""zero"",
+        > 0 when x < 10 => ""small"",
+        _ => ""other""
+    };
+
+    public static string Coalesce(string? a, string? b) => a ?? b ?? ""none"";
+    public static int? NullableValue(int? a) => a ?? 3;
+    public static TValue Generic<TValue>(TValue? a, TValue b) where TValue : class => a ?? b;
+
+    // the second condition needs the first one's pattern variable, inside the probed do condition
+    public static int DoPattern(object[] xs) { var i = 0; object o; do { o = xs[i++]; } while (!(o is string s) || s.Length == 0); return i; }
+
+    static readonly int Initialized = Compute();
+    static int Compute() => 7;
+    static int[] Array = { 1, 2 };
+    public static int Field() => Initialized + Array.Length;
+    public static List<int> Items { get; } = new() { 1 };
+    public static int Count() => Items.Count;
+
+    public static int Guard(object o) { switch (o) { case int i when i > 0: return 1; default: return 0; } }
+    public static bool Filter(bool b) { try { throw new InvalidOperationException(); } catch (InvalidOperationException) when (b) { return true; } catch { return false; } }
+}";
+
+    private static int LineIn(string source, string text) =>
+        source.Split('\n').Select((l, i) => (l, i)).Single(x => x.l.Contains(text, StringComparison.Ordinal)).i + 1;
+
+    [TestMethod]
+    public void ProbesInExpressions()
+    {
+        var p = McDcEndToEndTests.Build(Expressions);
+        p.Check("DoWhile", 3);
+        p.Check("Lambdas", 2);
+        p.Check("Arms", 0);
+        p.Check("Arms", 5);
+        p.Check("Coalesce", null, "b");
+        p.Check("Coalesce", "a", null);
+        p.Check("Field");
+        p.Check("Count");
+        p.Check("NullableValue", new object?[] { null });
+        p.Check("NullableValue", 1);
+        p.Check("DoPattern", new object[] { new object[] { 1, "", "x" } });
+        p.Check("Guard", 5);
+        p.Check("Filter", true);
+        p.Check("Filter", false);
+
+        var c = p.Coverage();
+        int Line(string text) => LineIn(Expressions, text);
+
+        c.LinesRun.Should().Contain(new[]
+        {
+            Line("while (i < n);"), Line("x * 2;"), Line("0 => \"zero\""), Line("> 0 when x < 10 =>"),
+            Line("static readonly int Initialized = Compute();"), Line("Items { get; } = new() { 1 };")
+        });
+        // inside a statement that ran: the lambda that never ran, the arm never taken
+        c.Lines.Except(c.LinesRun).Should().Contain(new[] { Line("x - 1;"), Line("_ =>") });
+
+        var arms = c.Switches.Single(s => s.Switch.Kind == SwitchEntry.Expression);
+        arms.NotTaken.Should().Equal("_");
+
+        // a ?? (b ?? "none"): the inner right side was never used
+        var coalesces = c.Switches.Where(s => s.Switch.Kind == SwitchEntry.Coalesce).ToList();
+        coalesces.Should().HaveCount(4);
+        // and Generic was never called
+        coalesces.SelectMany(s => s.NotTaken).Should().Equal("right side used", "left side not null", "right side used");
+
+        // single-condition when guards and catch filters are decisions
+        var guard = p.Result("i > 0");
+        (guard.OutcomeTrue, guard.OutcomeFalse).Should().Be((true, false));
+        var filter = p.Result("b");
+        (filter.OutcomeTrue, filter.OutcomeFalse).Should().Be((true, true));
+    }
+
     [TestMethod]
     public void TopLevelStatements()
     {

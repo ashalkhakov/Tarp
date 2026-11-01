@@ -47,13 +47,17 @@ public class FileCoverage
         var files = new Dictionary<string, FileCoverage>();
         FileCoverage For(string file) => files.TryGetValue(file, out var f) ? f : files[file] = new FileCoverage { File = file };
 
-        foreach (var p in map.Probes.Where(p => p.Kind is ProbeEntry.Statement or ProbeEntry.EmptyBlock))
+        // a line belongs to the innermost probes covering it: the lines of an arm of a switch expression,
+        // or of a lambda's body, are run when they ran, not when the statement around them started
+        foreach (var file in map.Probes.Where(p => p.Kind is ProbeEntry.Statement or ProbeEntry.EmptyBlock).GroupBy(p => p.File))
         {
-            var f = For(p.File);
-            for (var line = p.Line; line <= p.EndLine; line++)
+            var f = For(file.Key);
+            foreach (var line in file.SelectMany(p => Enumerable.Range(p.Line, p.EndLine - p.Line + 1)).Distinct())
             {
+                var covering = file.Where(p => p.Line <= line && line <= p.EndLine).ToList();
+                var innermost = covering.Min(p => p.EndLine - p.Line);
                 f.Lines.Add(line);
-                if (ran.Contains(p.Id))
+                if (covering.Any(p => p.EndLine - p.Line == innermost && ran.Contains(p.Id)))
                 {
                     f.LinesRun.Add(line);
                 }
