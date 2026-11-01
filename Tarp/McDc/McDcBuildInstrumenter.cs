@@ -170,7 +170,7 @@ public class McDcBuildInstrumenter
             {
                 check = check.ReplaceSyntaxTree(original, instrumented);
             }
-            check = check.AddSyntaxTrees(CSharpSyntaxTree.ParseText(McDcRuntimeSource.Generate("check", ""), parseOptions));
+            check = check.AddSyntaxTrees(CSharpSyntaxTree.ParseText(McDcRuntimeSource.Generate("check", "", map.Probes.Count), parseOptions));
 
             var newErrors = rewritten.Values
                 .SelectMany(t => check.GetSemanticModel(t).GetDiagnostics())
@@ -219,7 +219,7 @@ public class McDcBuildInstrumenter
         foreach (var (tree, _) in toInstrument)
         {
             var first = map.Decisions.Count;
-            var rewriter = new DecisionRewriter(compilation.GetSemanticModel(tree), map, DisplayPath(request, tree.FilePath), excluded[tree.FilePath]);
+            var rewriter = new CoverageRewriter(compilation.GetSemanticModel(tree), map, DisplayPath(request, tree.FilePath), excluded[tree.FilePath]);
             var root = (CompilationUnitSyntax)rewriter.Visit(tree.GetRoot())!;
             var text = McDcProjectInstrumenter.WithPrologue(root, tree.FilePath).ToFullString();
 
@@ -302,7 +302,7 @@ public class McDcBuildInstrumenter
         }
 
         var runtimePath = Path.GetFullPath(Path.Combine(request.OutputDirectory, McDcRuntimeSource.FileName));
-        WriteIfChanged(runtimePath, McDcRuntimeSource.Generate(map.ModuleId, request.ResultsDirectory));
+        WriteIfChanged(runtimePath, McDcRuntimeSource.Generate(map.ModuleId, request.ResultsDirectory, map.Probes.Count));
         added.Add(runtimePath);
 
         WriteIfChanged(Path.Combine(request.OutputDirectory, ReplacedFileName), string.Join('\n', instrumented.Select(t => t.Identity)) + "\n");

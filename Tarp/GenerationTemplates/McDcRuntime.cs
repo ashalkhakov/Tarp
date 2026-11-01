@@ -11,6 +11,9 @@ namespace TarpGen
         private const string ModuleId = "__TARP_MODULE_ID__";
         private const string DefaultHitsDirectory = @"__TARP_HITS_DIR__";
 
+        // line coverage: one flag per probe (see Tarp.McDc.CoverageRewriter)
+        private static readonly bool[] _probes = new bool[__TARP_PROBE_COUNT__];
+
         /*
          * One evaluation of a decision in progress. It is a local of the instrumented code (declared
          * by the first condition's marker with "out var", passed to the others by ref), so it lives
@@ -31,6 +34,12 @@ namespace TarpGen
         {
             System.AppDomain.CurrentDomain.ProcessExit += (s, e) => Dump();
             System.AppDomain.CurrentDomain.DomainUnload += (s, e) => Dump();
+        }
+
+        // runs right before a statement
+        public static void P(int id)
+        {
+            _probes[id] = true;
         }
 
         /*
@@ -98,7 +107,14 @@ namespace TarpGen
         internal static string Snapshot()
         {
             var sb = new System.Text.StringBuilder();
-            sb.Append("tarp-mcdc 1 ").Append(ModuleId).Append('\n');
+            sb.Append("tarp-mcdc 2 ").Append(ModuleId).Append('\n');
+            for (var i = 0; i < _probes.Length; i++)
+            {
+                if (_probes[i])
+                {
+                    sb.Append("p ").Append(i).Append('\n');
+                }
+            }
             foreach (var key in _hits.Keys)
             {
                 var id = (int)(key >> 33);
@@ -119,7 +135,7 @@ namespace TarpGen
                 {
                     dir = DefaultHitsDirectory;
                 }
-                if (string.IsNullOrEmpty(dir) || _hits.IsEmpty)
+                if (string.IsNullOrEmpty(dir) || _hits.IsEmpty && System.Array.IndexOf(_probes, true) < 0)
                 {
                     return;
                 }

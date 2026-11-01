@@ -2,6 +2,21 @@
 
 Tarp is a test coverage measurement tool for C#.
 
+## What Tarp measures
+
+From one run of your tests, in source terms (what you wrote, not the compiled IL):
+
+- **Lines**: a probe runs right before each statement, and a statement's lines count as run once it
+  has started, so a call that throws doesn't make the lines after it look run. A compound statement's
+  probe covers its header (`if (...)`, `switch (...)`); its body has probes of its own.
+- **Functions**: entered or not, and which exits were taken: `return` and `throw` statements, and the
+  end of the body when it can be reached. Methods, constructors, accessors, operators, local
+  functions and top-level statements count; lambdas don't (their statements are still lines).
+- **Branches**: both outcomes of every decision, and every `switch` section, including "no case
+  matched" for a switch without a `default`.
+- **Conditions**: each condition of each decision seen both true and false.
+- **MC/DC**: each condition shown to independently affect its decision's outcome (masking MC/DC).
+
 ## MC/DC
 
 Tarp measures masking MC/DC (modified condition/decision coverage) of the code your tests run.

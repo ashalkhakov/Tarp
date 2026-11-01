@@ -12,6 +12,10 @@ public class McDcMap
     public string ModuleId { get; set; } = "";
     public List<DecisionEntry> Decisions { get; set; } = new();
     public List<SkippedDecision> Skipped { get; set; } = new();
+    // line, function and switch coverage (see CoverageRewriter)
+    public List<ProbeEntry> Probes { get; set; } = new();
+    public List<FunctionEntry> Functions { get; set; } = new();
+    public List<SwitchEntry> Switches { get; set; } = new();
 
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
@@ -42,4 +46,44 @@ public class SkippedDecision
     public int SpanStart { get; set; }
     public string Text { get; set; } = "";
     public string Reason { get; set; } = "";
+}
+
+// a probe runs right before a statement: the statement's lines count as run once it has started
+public class ProbeEntry
+{
+    public const string Statement = "statement";
+    // the end of a function's body, reached by falling off it
+    public const string End = "end";
+    // an empty block, e.g. "else { }"
+    public const string EmptyBlock = "empty-block";
+    // the default section Tarp adds to a switch that has none: no case matched
+    public const string NoCaseMatched = "no-case-matched";
+
+    public int Id { get; set; }
+    public string File { get; set; } = "";
+    public int Line { get; set; }
+    public int EndLine { get; set; }
+    public string Kind { get; set; } = Statement;
+}
+
+public class FunctionEntry
+{
+    public int Id { get; set; }
+    public string File { get; set; } = "";
+    public int Line { get; set; }
+    public string Name { get; set; } = "";
+    // the probe that runs first in the function
+    public int Entry { get; set; } = -1;
+    // the probes of its exit points: return and throw statements, and the end of the body
+    public List<int> Exits { get; set; } = new();
+}
+
+public class SwitchEntry
+{
+    public int Id { get; set; }
+    public string File { get; set; } = "";
+    public int Line { get; set; }
+    // per section: its labels, and the probe of its first statement
+    public List<string> Labels { get; set; } = new();
+    public List<int> Sections { get; set; } = new();
 }

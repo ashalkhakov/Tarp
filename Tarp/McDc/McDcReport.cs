@@ -7,6 +7,9 @@ using System.Text;
 
 namespace Tarp.McDc;
 
+// one instrumented assembly: what was instrumented, and what ran
+public record ModuleResult(McDcMap Map, List<DecisionResult> Decisions, IReadOnlySet<int> Probes);
+
 public static class McDcReport
 {
     public static List<DecisionResult> Analyze(McDcMap map, IEnumerable<McDcHit> hits)
@@ -19,30 +22,45 @@ public static class McDcReport
      * Loads every map (*.map.json) in a directory, and the hits (*.hits) under it or in hitsDirectory:
      * the results directory of `dotnet tarp test`, or the output directory of mcdc-instrument.
      */
-    public static List<(McDcMap Map, List<DecisionResult> Results)> AnalyzeDirectory(string directory, string? hitsDirectory = null)
+    public static List<ModuleResult> AnalyzeDirectory(string directory, string? hitsDirectory = null)
     {
         var maps = Directory.EnumerateFiles(directory, "*" + McDcMap.FileSuffix)
             .OrderBy(p => p, StringComparer.Ordinal)
             .Select(p => McDcMap.FromJson(File.ReadAllText(p)))
             .ToList();
 
-        var hitFiles = Directory.EnumerateFiles(hitsDirectory ?? directory, "*.hits", SearchOption.AllDirectories).ToList();
+        var hitFiles = Directory.EnumerateFiles(hitsDirectory ?? directory, "*.hits", SearchOption.AllDirectories)
+            .Select(File.ReadAllText)
+            .ToList();
 
         return maps
-            .Select(m => (m, Analyze(m, hitFiles.SelectMany(f => McDcHits.Parse(File.ReadAllText(f), m.ModuleId)).Distinct())))
+            .Select(m => new ModuleResult(
+                m,
+                Analyze(m, hitFiles.SelectMany(f => McDcHits.Parse(f, m.ModuleId)).Distinct()),
+                hitFiles.SelectMany(f => McDcHits.ParseProbes(f, m.ModuleId)).ToHashSet()))
             .ToList();
     }
 
-    public static string Format(McDcMap map, IReadOnlyList<DecisionResult> results) =>
-        Format(new List<(McDcMap, List<DecisionResult>)> { (map, results.ToList()) });
+    public static string Format(McDcMap map, IReadOnlyList<DecisionResult> results, IReadOnlySet<int>? probes = null) =>
+        Format(new List<ModuleResult> { new(map, results.ToList(), probes ?? new HashSet<int>()) });
 
-    public static string Format(IReadOnlyList<(McDcMap Map, List<DecisionResult> Results)> modules)
+    public static string Format(IReadOnlyList<ModuleResult> modules)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("Tarp MC/DC report (masking MC/DC)");
+        sb.AppendLine("Tarp coverage report");
         sb.AppendLine();
 
-        var results = modules.SelectMany(m => m.Results).ToList();
+        FormatSummary(sb, modules);
+
+        foreach (var file in modules.SelectMany(FileCoverage.Of).GroupBy(f => f.File).OrderBy(g => g.Key, StringComparer.Ordinal))
+        {
+            FormatFile(sb, file.Key, file.ToList());
+        }
+
+        sb.AppendLine("MC/DC by decision (masking MC/DC)");
+        sb.AppendLine();
+
+        var results = modules.SelectMany(m => m.Decisions).ToList();
         var skipped = modules.SelectMany(m => m.Map.Skipped).ToList();
 
         foreach (var r in results)
@@ -69,6 +87,93 @@ public static class McDcReport
         }
 
         return sb.ToString();
+    }
+
+    private static void FormatSummary(StringBuilder sb, IReadOnlyList<ModuleResult> modules)
+    {
+        var files = modules.SelectMany(FileCoverage.Of).ToList();
+        var decisions = modules.SelectMany(m => m.Decisions).ToList();
+        var conditions = decisions.SelectMany(d => d.Conditions).ToList();
+
+        var lines = (files.Sum(f => f.LinesRun.Count), files.Sum(f => f.Lines.Count));
+        var branches = (files.Sum(f => f.BranchesTaken), files.Sum(f => f.Branches));
+        var functions = (files.Sum(f => f.Functions.Count(x => x.Entered)), files.Sum(f => f.Functions.Count));
+        var exits = (files.Sum(f => f.Functions.Sum(x => x.ExitsTaken)), files.Sum(f => f.Functions.Sum(x => x.Function.Exits.Count)));
+        var seen = (conditions.Count(c => c.SeenTrue && c.SeenFalse), conditions.Count);
+        var mcdc = (conditions.Count(c => c.Covered), conditions.Count);
+
+        sb.AppendLine("Summary");
+        sb.AppendLine(Row("Lines", lines, ""));
+        sb.AppendLine(Row("Branches", branches, "decision outcomes and switch sections"));
+        sb.AppendLine(Row("Functions", functions, $"entered; exits {exits.Item1}/{exits.Item2}"));
+        sb.AppendLine(Row("Conditions", seen, "seen both true and false"));
+        sb.AppendLine(Row("MC/DC", mcdc, "conditions shown to affect their decision"));
+        sb.AppendLine();
+    }
+
+    private static string Row(string name, (int Covered, int Total) n, string note)
+    {
+        var percent = n.Total == 0 ? 100.0 : 100.0 * n.Covered / n.Total;
+        var text = string.Format(CultureInfo.InvariantCulture, "  {0,-11}{1,6}/{2,-6}{3,6:0.0}%", name, n.Covered, n.Total, percent);
+        return note.Length == 0 ? text : text + "  " + note;
+    }
+
+    private static void FormatFile(StringBuilder sb, string file, List<FileCoverage> parts)
+    {
+        var lines = parts.SelectMany(p => p.Lines).ToHashSet();
+        var run = parts.SelectMany(p => p.LinesRun).ToHashSet();
+        var notRun = lines.Except(run).OrderBy(l => l).ToList();
+
+        sb.AppendLine(CultureInfo.InvariantCulture, $"{file}: lines {run.Count}/{lines.Count}");
+        if (notRun.Count > 0)
+        {
+            sb.AppendLine(CultureInfo.InvariantCulture, $"  lines not run: {Ranges(notRun)}");
+        }
+
+        foreach (var f in parts.SelectMany(p => p.Functions).OrderBy(f => f.Function.Line))
+        {
+            if (!f.Entered)
+            {
+                sb.AppendLine(CultureInfo.InvariantCulture, $"  never entered: {f.Function.Name} (line {f.Function.Line})");
+            }
+            else if (f.ExitsNotTaken.Count > 0)
+            {
+                sb.AppendLine(CultureInfo.InvariantCulture, $"  {f.Function.Name}: exits not taken at line {string.Join(", ", f.ExitsNotTaken)}");
+            }
+        }
+
+        foreach (var s in parts.SelectMany(p => p.Switches).OrderBy(s => s.Switch.Line))
+        {
+            if (s.NotTaken.Count > 0)
+            {
+                sb.AppendLine(CultureInfo.InvariantCulture, $"  switch at line {s.Switch.Line}: sections not taken: {string.Join("; ", s.NotTaken)}");
+            }
+        }
+
+        foreach (var d in parts.SelectMany(p => p.Decisions).Where(d => d.Executed && !(d.OutcomeTrue && d.OutcomeFalse)))
+        {
+            sb.AppendLine(CultureInfo.InvariantCulture,
+                $"  line {d.Decision.Line}: {OneLine(d.Decision.Text)} was only {(d.OutcomeTrue ? "true" : "false")}");
+        }
+
+        sb.AppendLine();
+    }
+
+    // 3, 4, 5, 9 -> "3-5, 9"
+    private static string Ranges(List<int> sorted)
+    {
+        var parts = new List<string>();
+        for (var i = 0; i < sorted.Count;)
+        {
+            var j = i;
+            while (j + 1 < sorted.Count && sorted[j + 1] == sorted[j] + 1)
+            {
+                j++;
+            }
+            parts.Add(i == j ? sorted[i].ToString(CultureInfo.InvariantCulture) : $"{sorted[i]}-{sorted[j]}");
+            i = j + 1;
+        }
+        return string.Join(", ", parts);
     }
 
     private static void FormatDecision(StringBuilder sb, DecisionResult r)

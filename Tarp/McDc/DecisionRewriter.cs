@@ -40,7 +40,7 @@ namespace Tarp.McDc;
  * Decisions we can't instrument without changing the program's meaning (or making it not compile) are
  * left alone and listed in the map as skipped, with the reason.
  */
-public sealed class DecisionRewriter : CSharpSyntaxRewriter
+public class DecisionRewriter : CSharpSyntaxRewriter
 {
     // the runtime's bit vectors and McDcFunctions' masks (2 bits per condition in an int)
     public const int MaxConditions = 16;
@@ -50,6 +50,10 @@ public sealed class DecisionRewriter : CSharpSyntaxRewriter
     private readonly SemanticModel _model;
     private readonly McDcMap _map;
     private readonly string _displayPath;
+
+    protected SemanticModel Model => _model;
+    protected McDcMap Map => _map;
+    protected string DisplayPath => _displayPath;
     // decisions not to instrument, by the start of their span, with the reason
     private readonly IReadOnlyDictionary<int, string> _excluded;
 
@@ -73,10 +77,10 @@ public sealed class DecisionRewriter : CSharpSyntaxRewriter
 
     private readonly Dictionary<SyntaxNode, bool> _excludedMembers = new();
 
-    // [ExcludeFromCodeCoverage] on the member, accessor, local function or type the decision is in
-    private bool IsExcludedFromCoverage(ExpressionSyntax e)
+    // [ExcludeFromCodeCoverage] on the member, accessor, local function or type the node is in (or is)
+    protected bool IsExcludedFromCoverage(SyntaxNode e)
     {
-        foreach (var a in e.Ancestors())
+        foreach (var a in e.AncestorsAndSelf())
         {
             if (a is not (MemberDeclarationSyntax or AccessorDeclarationSyntax or LocalFunctionStatementSyntax))
             {

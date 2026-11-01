@@ -68,7 +68,7 @@ public class McDcProjectInstrumenter
 
             var tree = await document.GetSyntaxTreeAsync(cts).ConfigureAwait(false);
             var model = compilation.GetSemanticModel(tree!);
-            var rewriter = new DecisionRewriter(model, map, relativePath.Replace('\\', '/'));
+            var rewriter = new CoverageRewriter(model, map, relativePath.Replace('\\', '/'));
             var root = (CompilationUnitSyntax)rewriter.Visit(await tree!.GetRootAsync(cts).ConfigureAwait(false))!;
 
             var newPath = fileSystem.Path.Combine(outputDir, relativePath);
@@ -78,7 +78,7 @@ public class McDcProjectInstrumenter
 
         fileSystem.File.WriteAllText(
             fileSystem.Path.Combine(outputDir, McDcRuntimeSource.FileName),
-            McDcRuntimeSource.Generate(map.ModuleId, fileSystem.Path.Combine(outputDir, HitsDirectoryName)));
+            McDcRuntimeSource.Generate(map.ModuleId, fileSystem.Path.Combine(outputDir, HitsDirectoryName), map.Probes.Count));
 
         var mapFileName = fileSystem.Path.GetFileNameWithoutExtension(project.FilePath!) + McDcMap.FileSuffix;
         fileSystem.File.WriteAllText(fileSystem.Path.Combine(outputDir, mapFileName), map.ToJson());

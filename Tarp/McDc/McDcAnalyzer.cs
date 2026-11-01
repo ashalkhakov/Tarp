@@ -22,17 +22,13 @@ public static class McDcHits
             yield break;
         }
 
-        var header = lines[0].Split(' ');
-        if (header.Length != 3 || header[0] != "tarp-mcdc" || header[1] != "1")
-        {
-            throw new FormatException("not a Tarp MC/DC hits file");
-        }
-        if (header[2] != moduleId)
+        if (!IsFor(lines[0], moduleId))
         {
             yield break;
         }
 
-        foreach (var line in lines.Skip(1))
+        // "p <id>" lines are probes (see ProbeHits)
+        foreach (var line in lines.Skip(1).Where(l => !l.StartsWith("p ", StringComparison.Ordinal)))
         {
             var f = line.Split(' ');
             yield return new McDcHit(
@@ -41,6 +37,31 @@ public static class McDcHits
                 uint.Parse(f[2], CultureInfo.InvariantCulture),
                 f[3] == "1");
         }
+    }
+
+    // version 1: decisions only; version 2: also probes
+    internal static bool IsFor(string headerLine, string moduleId)
+    {
+        var header = headerLine.Split(' ');
+        if (header.Length != 3 || header[0] != "tarp-mcdc" || header[1] is not ("1" or "2"))
+        {
+            throw new FormatException("not a Tarp MC/DC hits file");
+        }
+        return header[2] == moduleId;
+    }
+
+    // the probes that ran
+    public static IEnumerable<int> ParseProbes(string text, string moduleId)
+    {
+        var lines = text.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        if (lines.Length == 0 || !IsFor(lines[0], moduleId))
+        {
+            return Enumerable.Empty<int>();
+        }
+        return lines.Skip(1)
+            .Where(l => l.StartsWith("p ", StringComparison.Ordinal))
+            .Select(l => int.Parse(l[2..], CultureInfo.InvariantCulture))
+            .ToList();
     }
 
     public static IEnumerable<McDcHit> LoadDirectory(string directory, string moduleId) =>
@@ -57,6 +78,9 @@ public class ConditionResult
     public string Text { get; init; } = "";
     public bool ShownTrue { get; init; }
     public bool ShownFalse { get; init; }
+    // condition coverage: evaluated to true / to false at least once (masked or not)
+    public bool SeenTrue { get; init; }
+    public bool SeenFalse { get; init; }
     public bool Covered => ShownTrue && ShownFalse;
 
     // condition values (null = not evaluated) that would show the missing value(s), if any
@@ -71,6 +95,9 @@ public class DecisionResult
     // evaluations whose recorded outcome or evaluated conditions don't match the decision: an instrumentation bug
     public List<McDcHit> Inconsistent { get; init; } = new();
     public bool Executed => Evaluations.Count > 0;
+    // decision coverage: the outcomes seen
+    public bool OutcomeTrue => Evaluations.Except(Inconsistent).Any(h => h.Outcome);
+    public bool OutcomeFalse => Evaluations.Except(Inconsistent).Any(h => !h.Outcome);
 }
 
 /*
@@ -111,6 +138,7 @@ public static class McDcAnalyzer
         }
 
         var result = new DecisionResult { Decision = decision, Evaluations = evaluations, Inconsistent = inconsistent };
+        var consistent = evaluations.Except(inconsistent).ToList();
         for (var i = 0; i < n; i++)
         {
             result.Conditions.Add(new ConditionResult
@@ -118,7 +146,9 @@ public static class McDcAnalyzer
                 Index = i,
                 Text = decision.Conditions[i],
                 ShownTrue = (indicator & TrueBit(i)) != 0,
-                ShownFalse = (indicator & FalseBit(i)) != 0
+                ShownFalse = (indicator & FalseBit(i)) != 0,
+                SeenTrue = consistent.Any(h => (h.Evaluated & h.Values & (1u << i)) != 0),
+                SeenFalse = consistent.Any(h => (h.Evaluated & ~h.Values & (1u << i)) != 0)
             });
         }
 
