@@ -36,29 +36,43 @@ namespace TarpGen
             System.AppDomain.CurrentDomain.DomainUnload += (s, e) => Dump();
         }
 
+        /*
+         * Read before writing: after its first hit, a probe only reads, so a hot loop doesn't keep
+         * writing its cache line, and threads on other cores keep their copies of it (no false sharing).
+         * A bool per probe, not a bit: each probe's write is its own, so threads never lose each other's.
+         */
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+        private static void Hit(int id)
+        {
+            if (!_probes[id])
+            {
+                _probes[id] = true;
+            }
+        }
+
         // runs right before a statement
         public static void P(int id)
         {
-            _probes[id] = true;
+            Hit(id);
         }
 
         // probes inside expressions: (PF(id) && false || (c)) is c, "when PT(id)" is always true,
         // PV(id, v) is v, PN(id, v) is v and runs the probe when v isn't null
         public static bool PF(int id)
         {
-            _probes[id] = true;
+            Hit(id);
             return false;
         }
 
         public static bool PT(int id)
         {
-            _probes[id] = true;
+            Hit(id);
             return true;
         }
 
         public static T PV<T>(int id, T value)
         {
-            _probes[id] = true;
+            Hit(id);
             return value;
         }
 
@@ -66,7 +80,7 @@ namespace TarpGen
         {
             if (value != null)
             {
-                _probes[id] = true;
+                Hit(id);
             }
             return value;
         }
