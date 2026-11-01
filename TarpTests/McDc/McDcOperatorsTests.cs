@@ -88,6 +88,27 @@ public static class T
         p.Map.Decisions.Should().NotContain(d => d.Text == "x == 3" || d.Text == "a == true");
     }
 
+    // the tutorial's xor gate (NASA/TM-2001-210876 §3.1.3): any three of the four tests give MC/DC, two never do
+    [TestMethod]
+    public void XorNeedsPairsWithDifferentOutcomes()
+    {
+        // TT and FF: a and b are each shown true and false (xor never masks), but the outcome is false both times
+        var p = McDcEndToEndTests.Build(Source);
+        p.Check("Xor", true, true);
+        p.Check("Xor", false, false);
+
+        var xor = p.Result("a ^ b");
+        xor.Conditions.Should().OnlyContain(c => c.ShownTrue && c.ShownFalse && !c.Paired && !c.Covered);
+        // one more test makes the pairs: TF (or FT)
+        xor.Conditions[0].Suggestions.Should().ContainSingle();
+
+        var report = McDcReport.Format(p.Map, p.Results());
+        report.Should().Contain("c0 a: NOT shown, missing a pair: shown true and false, but never with different outcomes");
+
+        p.Check("Xor", true, false);
+        ShouldBeCovered(p.Result("a ^ b"));
+    }
+
     [TestMethod]
     public void NonShortCircuitOperatorsMask()
     {

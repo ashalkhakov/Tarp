@@ -214,7 +214,10 @@ public static class McDcReport
                 continue;
             }
 
-            var missing = !c.ShownTrue && !c.ShownFalse ? "true and false" : !c.ShownTrue ? "true" : "false";
+            var missing = !c.ShownTrue && !c.ShownFalse ? "true and false"
+                : !c.ShownTrue ? "true"
+                : !c.ShownFalse ? "false"
+                : "a pair: shown true and false, but never with different outcomes";
             sb.AppendLine(CultureInfo.InvariantCulture, $"{label}: NOT shown, missing {missing}");
             if (c.Suggestions.Count == 0)
             {

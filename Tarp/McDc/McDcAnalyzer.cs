@@ -81,7 +81,13 @@ public class ConditionResult
     // condition coverage: evaluated to true / to false at least once (masked or not)
     public bool SeenTrue { get; init; }
     public bool SeenFalse { get; init; }
-    public bool Covered => ShownTrue && ShownFalse;
+    /*
+     * shown true and shown false in evaluations with different outcomes. With && || ! only, a condition
+     * that isn't masked decides the outcome, so that follows; with ^ == != ?: it doesn't: a ^ b with
+     * TT and FF shows a true and false, both times with outcome false (the tutorial's "any three of four")
+     */
+    public bool Paired { get; init; } = true;
+    public bool Covered => ShownTrue && ShownFalse && Paired;
 
     // condition values (null = not evaluated) that would show the missing value(s), if any
     public List<bool?[]> Suggestions { get; } = new();
@@ -152,14 +158,15 @@ public static class McDcAnalyzer
         }
         evaluations = evaluations.Distinct().OrderBy(h => h.Evaluated).ThenBy(h => h.Values).ToList();
 
-        var indicator = 0;
-        foreach (var h in evaluations.Except(inconsistent))
-        {
-            indicator |= shown(h.Evaluated, h.Values);
-        }
-
         var result = new DecisionResult { Decision = decision, Evaluations = evaluations, Inconsistent = inconsistent };
         var consistent = evaluations.Except(inconsistent).ToList();
+
+        var indicator = 0;
+        var perEvaluation = consistent.Select(h => (Shown: shown(h.Evaluated, h.Values), h.Outcome)).ToList();
+        foreach (var e in perEvaluation)
+        {
+            indicator |= e.Shown;
+        }
         for (var i = 0; i < n; i++)
         {
             result.Conditions.Add(new ConditionResult
@@ -168,14 +175,76 @@ public static class McDcAnalyzer
                 Text = decision.Conditions[i],
                 ShownTrue = (indicator & TrueBit(i)) != 0,
                 ShownFalse = (indicator & FalseBit(i)) != 0,
+                Paired = classic || HasPair(perEvaluation, i),
                 SeenTrue = consistent.Any(h => (h.Evaluated & h.Values & (1u << i)) != 0),
                 SeenFalse = consistent.Any(h => (h.Evaluated & ~h.Values & (1u << i)) != 0)
             });
         }
 
-        Suggest(tree, shown, result.Conditions);
+        if (classic)
+        {
+            Suggest(tree, shown, result.Conditions);
+        }
+        else
+        {
+            SuggestPairs(tree, shown, result.Conditions, perEvaluation);
+        }
 
         return result;
+    }
+
+    // two evaluations showing condition i true and false, with different outcomes
+    private static bool HasPair(IReadOnlyList<(int Shown, bool Outcome)> evaluations, int i) =>
+        evaluations.Any(a => (a.Shown & TrueBit(i)) != 0 &&
+                             evaluations.Any(b => (b.Shown & FalseBit(i)) != 0 && b.Outcome != a.Outcome));
+
+    // with ^ == != ?:: a test that makes a pair with one already run, or else two that make one
+    private static void SuggestPairs(McDcNode tree, Func<uint, uint, int> shownBy, List<ConditionResult> conditions,
+        List<(int Shown, bool Outcome)> run)
+    {
+        var n = conditions.Count;
+        var candidates = new List<(bool?[] Vector, int Shown, bool Outcome)>();
+        var seen = new HashSet<(uint, uint)>();
+        for (uint input = 0; input < 1u << n; input++)
+        {
+            uint evaluated = 0;
+            var outcome = DecisionTree.Evaluate(tree, input, ref evaluated);
+            var values = input & evaluated;
+            if (!seen.Add((evaluated, values)))
+            {
+                continue;
+            }
+            var vector = new bool?[n];
+            for (var i = 0; i < n; i++)
+            {
+                vector[i] = (evaluated & (1u << i)) != 0 ? (values & (1u << i)) != 0 : null;
+            }
+            candidates.Add((vector, shownBy(evaluated, values), outcome));
+        }
+
+        static bool Pair(int aShown, bool aOutcome, int bShown, bool bOutcome, int i) =>
+            aOutcome != bOutcome &&
+            ((aShown & TrueBit(i)) != 0 && (bShown & FalseBit(i)) != 0 || (aShown & FalseBit(i)) != 0 && (bShown & TrueBit(i)) != 0);
+
+        foreach (var c in conditions.Where(c => !c.Covered))
+        {
+            var one = candidates.FirstOrDefault(u => run.Any(e => Pair(u.Shown, u.Outcome, e.Shown, e.Outcome, c.Index)));
+            if (one.Vector != null)
+            {
+                c.Suggestions.Add(one.Vector);
+                continue;
+            }
+            foreach (var a in candidates)
+            {
+                var b = candidates.FirstOrDefault(x => Pair(a.Shown, a.Outcome, x.Shown, x.Outcome, c.Index));
+                if (b.Vector != null)
+                {
+                    c.Suggestions.Add(a.Vector);
+                    c.Suggestions.Add(b.Vector);
+                    break;
+                }
+            }
+        }
     }
 
     // replays one evaluation: the markers of the evaluated conditions, in evaluation (left to right) order
