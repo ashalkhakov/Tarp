@@ -104,7 +104,7 @@ public static class McDcReport
 
         sb.AppendLine("Summary");
         sb.AppendLine(Row("Lines", lines, ""));
-        sb.AppendLine(Row("Branches", branches, "decision outcomes, switch sections and arms, ?? sides"));
+        sb.AppendLine(Row("Branches", branches, "decision outcomes, switch sections and arms, ??, ?., foreach"));
         sb.AppendLine(Row("Functions", functions, $"entered; exits {exits.Item1}/{exits.Item2}"));
         sb.AppendLine(Row("Conditions", seen, "seen both true and false"));
         sb.AppendLine(Row("MC/DC", mcdc, "conditions shown to affect their decision"));

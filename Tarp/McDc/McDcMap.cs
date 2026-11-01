@@ -33,8 +33,11 @@ public class DecisionEntry
     public int Column { get; set; }
     // position in the original file, identifies the decision across instrumentation passes
     public int SpanStart { get; set; }
-    // the decision's source text: the report rebuilds the tree from it (see DecisionTree)
+    // the decision's source text
     public string Text { get; set; } = "";
+    // its structure, with c0, c1, ... for the conditions, e.g. "(c0) == ((c1) || (c2))": the report
+    // rebuilds the tree from it (see DecisionTree; maps without it: from the text)
+    public string? Shape { get; set; }
     public List<string> Conditions { get; set; } = new();
 }
 

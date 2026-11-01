@@ -110,31 +110,52 @@ public static class McDcAnalyzer
 {
     public static DecisionResult Analyze(DecisionEntry decision, IEnumerable<McDcHit> hits)
     {
-        var conditionSyntax = new List<ExpressionSyntax>();
-        var tree = DecisionTree.Parse(decision.Text, conditionSyntax);
-        var markers = new McDcFunctions().CreateMarkers(tree);
-        var n = markers.Count;
+        var leaves = new List<ExpressionSyntax>();
+        var tree = decision.Shape != null
+            ? DecisionTree.Parse(decision.Shape, leaves, allOperators: true)
+            : DecisionTree.Parse(decision.Text, leaves);
+        var n = leaves.Count;
 
         if (n != decision.Conditions.Count)
         {
-            throw new InvalidDataException($"decision {decision.Id} has {decision.Conditions.Count} conditions in the map, but {n} in its text");
+            throw new InvalidDataException($"decision {decision.Id} has {decision.Conditions.Count} conditions in the map, but {n} in its shape");
         }
 
-        var evaluations = hits.Where(h => h.DecisionId == decision.Id).Distinct()
-                              .OrderBy(h => h.Evaluated).ThenBy(h => h.Values).ToList();
+        // && || !: McDcFunctions' monitor; with & | ^ == != ?: too, masking computed directly
+        var classic = DecisionTree.IsClassic(tree);
+        var markers = classic ? new McDcFunctions().CreateMarkers(tree) : null;
+        Func<uint, uint, int> shown = classic
+            ? (evaluated, values) => Monitor(markers!, evaluated, values)
+            : (evaluated, values) => DecisionTree.Shown(tree, evaluated, values);
 
-        var indicator = 0;
+        var recorded = hits.Where(h => h.DecisionId == decision.Id).Distinct().ToList();
+        var evaluations = new List<McDcHit>();
         var inconsistent = new List<McDcHit>();
-        foreach (var h in evaluations)
+        foreach (var h in recorded)
         {
             uint evaluated = 0;
             var outcome = DecisionTree.Evaluate(tree, h.Values, ref evaluated);
-            if (evaluated != h.Evaluated || outcome != h.Outcome)
+            if (classic)
             {
-                inconsistent.Add(h);
-                continue;
+                // complete evaluations, with their outcome: anything else is an instrumentation bug
+                evaluations.Add(h);
+                if (evaluated != h.Evaluated || outcome != h.Outcome)
+                {
+                    inconsistent.Add(h);
+                }
             }
-            indicator |= Monitor(markers, h.Evaluated, h.Values);
+            else if (evaluated == h.Evaluated)
+            {
+                // every marker records the evaluation so far: the complete ones evaluate exactly what the decision does
+                evaluations.Add(h with { Outcome = outcome });
+            }
+        }
+        evaluations = evaluations.Distinct().OrderBy(h => h.Evaluated).ThenBy(h => h.Values).ToList();
+
+        var indicator = 0;
+        foreach (var h in evaluations.Except(inconsistent))
+        {
+            indicator |= shown(h.Evaluated, h.Values);
         }
 
         var result = new DecisionResult { Decision = decision, Evaluations = evaluations, Inconsistent = inconsistent };
@@ -152,7 +173,7 @@ public static class McDcAnalyzer
             });
         }
 
-        Suggest(tree, markers, result.Conditions);
+        Suggest(tree, shown, result.Conditions);
 
         return result;
     }
@@ -178,14 +199,14 @@ public static class McDcAnalyzer
     private static string Normalize(string text) =>
         string.Concat(text.Where(c => !char.IsWhiteSpace(c)));
 
-    private static void Suggest(McDcNode tree, IReadOnlyList<MarkerFunction> markers, List<ConditionResult> conditions)
+    private static void Suggest(McDcNode tree, Func<uint, uint, int> shownBy, List<ConditionResult> conditions)
     {
         if (conditions.All(c => c.Covered))
         {
             return;
         }
 
-        var n = markers.Count;
+        var n = conditions.Count;
         var missing = new List<(ConditionResult Condition, int Bit)>();
         foreach (var c in conditions)
         {
@@ -213,7 +234,7 @@ public static class McDcAnalyzer
                 continue;
             }
 
-            var shown = Monitor(markers, evaluated, values);
+            var shown = shownBy(evaluated, values);
             foreach (var m in missing.Where(m => (shown & m.Bit) != 0).ToList())
             {
                 var vector = new bool?[n];

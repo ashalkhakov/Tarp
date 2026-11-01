@@ -17,8 +17,12 @@ From one run of your tests, in source terms (what you wrote, not the compiled IL
   functions and top-level statements count; lambdas don't (their statements are still lines).
 - **Branches**: both outcomes of every decision (including `when` guards and `catch` filters), every
   `switch` section (including "no case matched" for a switch without a `default`), every switch
-  expression arm, and both sides of `??`.
-- **Conditions**: each condition of each decision seen both true and false.
+  expression arm, both sides of `??`, null and not null for `?.` and `?[]`, and whether a `foreach`
+  iterated at all.
+- **Conditions**: each condition of each decision seen both true and false. A decision is a boolean
+  expression with `&&`, `||`, `!`, and on bools `&`, `|`, `^`, `==`, `!=` and `?:` (as DO-178C counts
+  them), and the primitive patterns of an `is` with `and`/`or`/`not` (`x is > 0 and < 10` has two
+  conditions).
 - **MC/DC**: each condition shown to independently affect its decision's outcome (masking MC/DC).
 
 ## MC/DC
@@ -70,8 +74,8 @@ SDK-style projects whose sources are under the project directory, without projec
 
 ### Not instrumented
 
-Listed in the report with the reason: decisions in expression-tree lambdas or query expressions,
-constant ones, ones with a condition that isn't a `bool` (e.g. `dynamic`) or with more than 16
+Listed in the report with the reason: decisions in expression-tree lambdas or in queries that
+become expression trees (`IQueryable`), constant ones, ones with a condition that isn't a `bool` (e.g. `dynamic`) or with more than 16
 conditions, ones in projects older than C# 7.3, and ones whose instrumentation breaks compilation.
 Pattern variables (`o is string s && s.Length > 0`), assignments in conditions and `await` are fine:
 each condition gets markers that keep what the compiler knows after it (see `DecisionRewriter`), and
