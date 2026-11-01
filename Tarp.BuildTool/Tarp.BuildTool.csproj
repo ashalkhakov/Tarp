@@ -6,9 +6,32 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
 	<PackAsTool>true</PackAsTool>
-	<ToolCommandName>tarp-buildtool</ToolCommandName>
+	<!-- dotnet-tarp: run as "dotnet tarp" -->
+	<ToolCommandName>dotnet-tarp</ToolCommandName>
 	<PackageOutputPath>./nupkg</PackageOutputPath>
+	<!-- run on whatever (newer) runtime the build machine has -->
+	<RollForward>Major</RollForward>
   </PropertyGroup>
+
+  <!-- the package: releases set Version from the tag (see .github/workflows/release.yml) -->
+  <PropertyGroup>
+	<PackageId>dotnet-tarp</PackageId>
+	<Version>0.1.0-dev</Version>
+	<Authors>Artyom Shalkhakov</Authors>
+	<Description>Tarp: MC/DC test coverage for C#. Run "dotnet tarp test" instead of "dotnet test".</Description>
+	<PackageTags>coverage;mcdc;code-coverage;testing</PackageTags>
+	<PackageLicenseExpression>BSD-3-Clause</PackageLicenseExpression>
+	<RepositoryUrl>https://github.com/ashalkhakov/Tarp</RepositoryUrl>
+	<PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+	<None Include="..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+	<None Include="Tarp.targets" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Tarp\Tarp.csproj" />

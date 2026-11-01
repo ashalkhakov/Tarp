@@ -1,0 +1,90 @@
+<Project>
+  <!--
+    Tarp: MC/DC instrumentation during the build.
+
+    `dotnet tarp test` imports this file into every project of the build (as
+    CustomAfterMicrosoftCommonTargets) and sets Tarp=true. Each C# project that isn't a test project
+    then compiles instrumented sources: right after BeforeCompile, Tarp rewrites the Compile items into
+    $(IntermediateOutputPath)tarp/ and swaps them in, and copies the project's map to the results
+    directory, where the instrumented code also writes its hits.
+
+    Properties:
+    - Tarp: true to instrument
+    - TarpExclude: true in a project not to instrument it
+    - TarpResultsDirectory: where maps and hits go (default: TestResults/tarp/ in the directory the build started in)
+    - TarpToolPath: Tarp.BuildTool.dll (default: next to this file)
+  -->
+  <PropertyGroup>
+    <TarpToolPath Condition="'$(TarpToolPath)' == ''">$(MSBuildThisFileDirectory)Tarp.BuildTool.dll</TarpToolPath>
+    <TarpResultsDirectory Condition="'$(TarpResultsDirectory)' == ''">$(MSBuildStartupDirectory)/TestResults/tarp/</TarpResultsDirectory>
+    <TarpResultsDirectory>$([MSBuild]::EnsureTrailingSlash('$([System.IO.Path]::GetFullPath('$(TarpResultsDirectory)'))'))</TarpResultsDirectory>
+
+    <_TarpEnabled>false</_TarpEnabled>
+    <_TarpEnabled Condition="'$(Tarp)' == 'true' and '$(Language)' == 'C#' and '$(IsTestProject)' != 'true' and '$(TarpExclude)' != 'true' and '$(DesignTimeBuild)' != 'true'">true</_TarpEnabled>
+
+    <_TarpIntermediateDirectory>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '$(IntermediateOutputPath)'))</_TarpIntermediateDirectory>
+    <_TarpDirectory>$(_TarpIntermediateDirectory)tarp/</_TarpDirectory>
+    <_TarpArgsFile>$(_TarpDirectory)args.txt</_TarpArgsFile>
+
+    <_TarpDotnet>$(DOTNET_HOST_PATH)</_TarpDotnet>
+    <_TarpDotnet Condition="'$(_TarpDotnet)' == ''">dotnet</_TarpDotnet>
+  </PropertyGroup>
+
+  <!-- before _GenerateCompileDependencyCache, so that swapping sources (in or out) triggers a recompile -->
+  <Target Name="TarpInstrument"
+          AfterTargets="BeforeCompile"
+          Condition="'$(_TarpEnabled)' == 'true'"
+          DependsOnTargets="_TarpWriteArgs;_TarpRun;_TarpSwapSources" />
+
+  <Target Name="_TarpWriteArgs">
+    <ItemGroup>
+      <_TarpDefine Include="$(DefineConstants)" />
+      <_TarpArg Include="project-name=$(MSBuildProjectName)" />
+      <_TarpArg Include="project-dir=$(MSBuildProjectDirectory)" />
+      <_TarpArg Include="assembly-name=$(AssemblyName)" />
+      <_TarpArg Include="target-framework=$(TargetFramework)" />
+      <_TarpArg Include="intermediate-dir=$(_TarpIntermediateDirectory)" />
+      <_TarpArg Include="output-dir=$(_TarpDirectory)" />
+      <_TarpArg Include="results-dir=$(TarpResultsDirectory)" />
+      <_TarpArg Include="lang-version=$(LangVersion)" />
+      <_TarpArg Include="nullable=$(Nullable)" />
+      <_TarpArg Include="allow-unsafe=$(AllowUnsafeBlocks)" />
+      <_TarpArg Include="@(_TarpDefine->'define=%(Identity)')" />
+      <_TarpArg Include="@(ReferencePath->'reference=%(FullPath)')" />
+      <_TarpArg Include="@(Analyzer->'analyzer=%(FullPath)')" />
+      <_TarpArg Include="@(AdditionalFiles->'additional-file=%(FullPath)')" />
+      <_TarpArg Include="@(EditorConfigFiles->'editorconfig=%(FullPath)')" />
+      <_TarpArg Include="@(Compile->'source=%(Identity)|%(FullPath)')" />
+    </ItemGroup>
+
+    <MakeDir Directories="$(_TarpDirectory)" />
+    <!-- unchanged arguments keep the file's timestamp, so _TarpRun can be skipped -->
+    <WriteLinesToFile File="$(_TarpArgsFile)" Lines="@(_TarpArg)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+  </Target>
+
+  <Target Name="_TarpRun"
+          Inputs="@(Compile);@(ReferencePath);$(_TarpArgsFile);$(TarpToolPath)"
+          Outputs="$(_TarpDirectory)instrumented.txt">
+    <Exec Command="&quot;$(_TarpDotnet)&quot; &quot;$(TarpToolPath)&quot; mcdc-build-instrument &quot;$(_TarpArgsFile)&quot;"
+          EnvironmentVariables="DOTNET_ROLL_FORWARD=Major" />
+  </Target>
+
+  <!-- always runs (also when _TarpRun was up to date): the lists are on disk -->
+  <Target Name="_TarpSwapSources">
+    <ReadLinesFromFile File="$(_TarpDirectory)replaced.txt">
+      <Output TaskParameter="Lines" ItemName="_TarpReplaced" />
+    </ReadLinesFromFile>
+    <ReadLinesFromFile File="$(_TarpDirectory)instrumented.txt">
+      <Output TaskParameter="Lines" ItemName="_TarpInstrumented" />
+    </ReadLinesFromFile>
+
+    <ItemGroup>
+      <Compile Remove="@(_TarpReplaced)" />
+      <Compile Include="@(_TarpInstrumented)" />
+      <_TarpMap Include="$(_TarpDirectory)*.map.json" />
+      <FileWrites Include="@(_TarpInstrumented);$(_TarpDirectory)*.txt;@(_TarpMap)" />
+    </ItemGroup>
+
+    <Copy SourceFiles="@(_TarpMap)" DestinationFolder="$(TarpResultsDirectory)" SkipUnchangedFiles="true" />
+  </Target>
+</Project>

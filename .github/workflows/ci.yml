@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          # 8: Tarp and its tests; 10: the SDK, and the sample's target framework
+          dotnet-version: |
+            8.0.x
+            10.0.x
+      - run: dotnet build McDcTestCoverage.sln -c Release
+      - run: dotnet test TarpTests -c Release --no-build
+
+  # the packed tool on a real solution
+  e2e:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+      - run: bash samples/e2e.sh
+        shell: bash
