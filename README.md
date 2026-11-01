@@ -68,5 +68,15 @@ report.
 
 To release, push a tag: `git tag v0.1.0 && git push origin v0.1.0`. The release workflow
 (`.github/workflows/release.yml`) takes the version from the tag, tests, packs, checks the package
-with `samples/e2e.sh`, and creates a GitHub release with the package. If the repository has a
-`NUGET_API_KEY` secret, it also publishes the package to nuget.org.
+with `samples/e2e.sh`, and creates a GitHub release with the package.
+
+It also publishes the package to nuget.org, with [trusted publishing](https://learn.microsoft.com/nuget/nuget-org/trusted-publishing)
+(no API key to store), once that is set up:
+
+1. On nuget.org, under your user name → **Trusted Publishing**, add a policy: repository owner
+   `ashalkhakov`, repository `Tarp`, workflow file `release.yml`, no environment.
+2. In the GitHub repository, add a `NUGET_USER` secret with your nuget.org profile name (not your email).
+
+To publish a tag that was released before that, run the Release workflow by hand (**Actions →
+Release → Run workflow**) with the tag: it checks the package attached to the tag's release and
+pushes that one.
