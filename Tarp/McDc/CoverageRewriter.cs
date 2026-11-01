@@ -58,7 +58,7 @@ public sealed class CoverageRewriter : DecisionRewriter
             result is StatementSyntax rewritten && ShouldProbe(original))
         {
             var probe = ProbeStatement(ProbeFor(original));
-            return Block(List(new[] { probe.WithTrailingTrivia(Space), rewritten.WithoutTrivia() }))
+            return Block(List(new[] { probe.WithTrailingTrivia(Space) }.Concat(WithForEachBranch(original, rewritten.WithoutTrivia()))))
                 .WithOpenBraceToken(Token(SyntaxKind.OpenBraceToken).WithLeadingTrivia(rewritten.GetLeadingTrivia()).WithTrailingTrivia(Space))
                 .WithCloseBraceToken(Token(SyntaxKind.CloseBraceToken).WithLeadingTrivia(Space).WithTrailingTrivia(rewritten.GetTrailingTrivia()));
         }
@@ -125,15 +125,57 @@ public sealed class CoverageRewriter : DecisionRewriter
             {
                 // label: P(id); statement -- a goto runs the probe too
                 result.Add(labeled.WithStatement(probe.WithLeadingTrivia(labeled.Statement.GetLeadingTrivia())));
-                result.Add(labeled.Statement.WithLeadingTrivia(Space));
+                result.AddRange(WithForEachBranch(((LabeledStatementSyntax)o).Statement, labeled.Statement.WithLeadingTrivia(Space)));
             }
             else
             {
                 result.Add(probe.WithLeadingTrivia(r.GetLeadingTrivia()).WithTrailingTrivia(Space));
-                result.Add(r.WithLeadingTrivia());
+                result.AddRange(WithForEachBranch(o, r.WithLeadingTrivia()));
             }
         }
         return List(result);
+    }
+
+    /*
+     * foreach: "iterated" and "no iterations" branches
+     *
+     *   bool __tarpRan9 = false; foreach (...) { __tarpRan9 = true; ... } if (!__tarpRan9) P(9);
+     *
+     * all on the loop's lines. Other statements: as they are.
+     */
+    private IEnumerable<StatementSyntax> WithForEachBranch(StatementSyntax original, StatementSyntax rewritten)
+    {
+        if (original is not CommonForEachStatementSyntax loop || rewritten is not CommonForEachStatementSyntax r ||
+            r.Statement is not BlockSyntax body || IsExcludedFromCoverage(original))
+        {
+            return new[] { rewritten };
+        }
+
+        var none = NewProbe(loop, OwnSpan(loop), ProbeEntry.Branch);
+        var flag = "__tarpRan" + none;
+        Map.Switches.Add(new SwitchEntry
+        {
+            Id = Map.Switches.Count,
+            File = DisplayPath,
+            Line = Line(loop),
+            Kind = SwitchEntry.ForEach,
+            Labels = { "iterated", "no iterations" },
+            Sections = { _firstProbe.TryGetValue(loop.Statement, out var first) ? first : -1, none }
+        });
+
+        var set = ParseStatement($"{flag} = true;").WithTrailingTrivia(Space);
+        body = body.Statements.Count == 0
+            ? body.WithStatements(SingletonList(set.WithLeadingTrivia(Space)))
+            : body.WithStatements(body.Statements
+                .Replace(body.Statements[0], body.Statements[0].WithLeadingTrivia())
+                .Insert(0, set.WithLeadingTrivia(body.Statements[0].GetLeadingTrivia())));
+
+        return new[]
+        {
+            ParseStatement($"bool {flag} = false;").WithLeadingTrivia(r.GetLeadingTrivia()).WithTrailingTrivia(Space),
+            r.WithStatement(body).WithLeadingTrivia().WithTrailingTrivia(Space),
+            ParseStatement($"if (!{flag}) {ProbeMethod}({none});").WithTrailingTrivia(r.GetTrailingTrivia())
+        };
     }
 
     private bool ShouldProbe(StatementSyntax s) => s switch
@@ -370,32 +412,123 @@ public sealed class CoverageRewriter : DecisionRewriter
             .WithRight(Probed($"{Runtime}.PV<{right}>({rightId}, __tarpValue)", rewritten.Right));
     }
 
-    // field initializers: = PV<Type>(id, value), so that their lines count
+    // field and event initializers: = PV<Type>(id, value), so that their lines count
     public override SyntaxNode? VisitFieldDeclaration(FieldDeclarationSyntax node)
     {
         var rewritten = (FieldDeclarationSyntax)base.VisitFieldDeclaration(node)!;
-        if (node.Modifiers.Any(m => m.IsKind(SyntaxKind.ConstKeyword) || m.IsKind(SyntaxKind.FixedKeyword)) ||
-            IsExcludedFromCoverage(node) || TypeArgument(Model.GetTypeInfo(node.Declaration.Type).Type) == null)
+        if (node.Modifiers.Any(m => m.IsKind(SyntaxKind.ConstKeyword) || m.IsKind(SyntaxKind.FixedKeyword)))
+        {
+            return rewritten;
+        }
+        return rewritten.WithDeclaration(ProbedVariables(node, node.Declaration, rewritten.Declaration));
+    }
+
+    public override SyntaxNode? VisitEventFieldDeclaration(EventFieldDeclarationSyntax node)
+    {
+        var rewritten = (EventFieldDeclarationSyntax)base.VisitEventFieldDeclaration(node)!;
+        return rewritten.WithDeclaration(ProbedVariables(node, node.Declaration, rewritten.Declaration));
+    }
+
+    private VariableDeclarationSyntax ProbedVariables(MemberDeclarationSyntax member, VariableDeclarationSyntax original, VariableDeclarationSyntax rewritten)
+    {
+        if (IsExcludedFromCoverage(member))
         {
             return rewritten;
         }
 
-        var type = node.Declaration.Type.WithoutTrivia().ToString();
         var variables = new List<VariableDeclaratorSyntax>();
-        for (var i = 0; i < node.Declaration.Variables.Count; i++)
+        for (var i = 0; i < original.Variables.Count; i++)
         {
-            var o = node.Declaration.Variables[i];
-            var v = rewritten.Declaration.Variables[i];
-            // int[] a = { 1, 2 }: an array initializer is no argument
-            if (o.Initializer == null || v.Initializer == null || o.Initializer.Value is InitializerExpressionSyntax)
-            {
-                variables.Add(v);
-                continue;
-            }
-            var id = NewProbe(o, o.Initializer.Value.Span, ProbeEntry.Statement);
-            variables.Add(v.WithInitializer(v.Initializer.WithValue(Probed($"{Runtime}.PV<{type}>({id}, __tarpValue)", v.Initializer.Value))));
+            var o = original.Variables[i];
+            var v = rewritten.Variables[i];
+            var value = o.Initializer != null && v.Initializer != null ? ProbedInitializer(o.Initializer, v.Initializer.Value, original.Type) : null;
+            variables.Add(value != null ? v.WithInitializer(v.Initializer!.WithValue(value)) : v);
         }
-        return rewritten.WithDeclaration(rewritten.Declaration.WithVariables(SeparatedList(variables, rewritten.Declaration.Variables.GetSeparators())));
+        return rewritten.WithVariables(SeparatedList(variables, rewritten.Variables.GetSeparators()));
+    }
+
+    // PV<Type>(id, value), with the declared type (target-typed values keep working); an array
+    // initializer { 1, 2 } is no argument, so it becomes new Type { 1, 2 }; null if it can't be probed
+    private ExpressionSyntax? ProbedInitializer(EqualsValueClauseSyntax original, ExpressionSyntax value, TypeSyntax type)
+    {
+        if (TypeArgument(Model.GetTypeInfo(type).Type) == null)
+        {
+            return null;
+        }
+        if (value is InitializerExpressionSyntax arrayInitializer)
+        {
+            if (type is not ArrayTypeSyntax arrayType)
+            {
+                return null;
+            }
+            value = ArrayCreationExpression(Token(SyntaxKind.NewKeyword).WithTrailingTrivia(Space), arrayType.WithoutTrivia(), arrayInitializer.WithoutTrivia())
+                .WithTriviaFrom(arrayInitializer);
+        }
+        var id = NewProbe(original, original.Value.Span, ProbeEntry.Statement);
+        return Probed($"{Runtime}.PV<{type.WithoutTrivia()}>({id}, __tarpValue)", value);
+    }
+
+    // : base(a, ...), : this(a, ...), class C(...) : B(a, ...): PV<A>(id, a), so that their lines count
+    public override SyntaxNode? VisitConstructorInitializer(ConstructorInitializerSyntax node)
+    {
+        var rewritten = (ConstructorInitializerSyntax)base.VisitConstructorInitializer(node)!;
+        var arguments = ProbedArguments(node, node.ArgumentList, rewritten.ArgumentList);
+        return arguments != null ? rewritten.WithArgumentList(arguments) : rewritten;
+    }
+
+    public override SyntaxNode? VisitPrimaryConstructorBaseType(PrimaryConstructorBaseTypeSyntax node)
+    {
+        var rewritten = (PrimaryConstructorBaseTypeSyntax)base.VisitPrimaryConstructorBaseType(node)!;
+        var arguments = ProbedArguments(node, node.ArgumentList, rewritten.ArgumentList);
+        return arguments != null ? rewritten.WithArgumentList(arguments) : rewritten;
+    }
+
+    // probes the first argument (it runs first); null when there's none, or it's passed by reference
+    private ArgumentListSyntax? ProbedArguments(SyntaxNode original, ArgumentListSyntax originalArguments, ArgumentListSyntax rewritten)
+    {
+        if (originalArguments.Arguments.Count == 0 || IsExcludedFromCoverage(original))
+        {
+            return null;
+        }
+        var first = originalArguments.Arguments[0];
+        var type = TypeArgument(Model.GetTypeInfo(first.Expression).ConvertedType);
+        if (!first.RefKindKeyword.IsKind(SyntaxKind.None) || type == null)
+        {
+            return null;
+        }
+        var id = NewProbe(original, original.Span, ProbeEntry.Statement);
+        var argument = rewritten.Arguments[0];
+        return rewritten.WithArguments(rewritten.Arguments.Replace(argument,
+            argument.WithExpression(Probed($"{Runtime}.PV<{type}>({id}, __tarpValue)", argument.Expression))));
+    }
+
+    // a?.b, a?[i]: PNN<A>(id, id2, a)?.b, "not null" and "null" branches (an inner ?. has no receiver of its own)
+    public override SyntaxNode? VisitConditionalAccessExpression(ConditionalAccessExpressionSyntax node)
+    {
+        var result = base.VisitConditionalAccessExpression(node);
+        if (result is not ConditionalAccessExpressionSyntax rewritten || node.Expression is MemberBindingExpressionSyntax or ElementBindingExpressionSyntax ||
+            IsExcludedFromCoverage(node) || IsInExpressionTree(node) || !CanCallHere(node))
+        {
+            return result;
+        }
+        var type = TypeArgument(Model.GetTypeInfo(node.Expression).Type);
+        if (type == null)
+        {
+            return result;
+        }
+
+        var notNull = NewProbe(node.Expression, node.Expression.Span, ProbeEntry.Branch);
+        var isNull = NewProbe(node.Expression, node.Expression.Span, ProbeEntry.Branch);
+        Map.Switches.Add(new SwitchEntry
+        {
+            Id = Map.Switches.Count,
+            File = DisplayPath,
+            Line = Line(node),
+            Kind = SwitchEntry.ConditionalAccess,
+            Labels = { "not null", "null" },
+            Sections = { notNull, isNull }
+        });
+        return rewritten.WithExpression(Probed($"{Runtime}.PNN<{type}>({notNull}, {isNull}, __tarpValue)", rewritten.Expression));
     }
 
     // a type as a type argument: null when it can't be one, or can't be written (anonymous types)
@@ -510,14 +643,10 @@ public sealed class CoverageRewriter : DecisionRewriter
         {
             // int X { get; } = e;  ->  = PV<int>(id, e);
             var initialized = (PropertyDeclarationSyntax)base.VisitPropertyDeclaration(node)!;
-            if (IsExcludedFromCoverage(node) || TypeArgument(Model.GetTypeInfo(node.Type).Type) == null || initialized.Initializer == null ||
-                node.Initializer.Value is InitializerExpressionSyntax)
-            {
-                return initialized;
-            }
-            var id = NewProbe(node.Initializer, node.Initializer.Value.Span, ProbeEntry.Statement);
-            return initialized.WithInitializer(initialized.Initializer.WithValue(
-                Probed($"{Runtime}.PV<{node.Type.WithoutTrivia()}>({id}, __tarpValue)", initialized.Initializer.Value)));
+            var value = IsExcludedFromCoverage(node) || initialized.Initializer == null
+                ? null
+                : ProbedInitializer(node.Initializer, initialized.Initializer.Value, node.Type);
+            return value != null ? initialized.WithInitializer(initialized.Initializer!.WithValue(value)) : initialized;
         }
         if (node.ExpressionBody == null || !BeginFunction(node, null, node.ExpressionBody, out var function, ".get"))
         {
@@ -571,7 +700,8 @@ public sealed class CoverageRewriter : DecisionRewriter
                     function.Entry = id;
                 }
                 members.Add(GlobalStatement(ProbeStatement(id)).WithLeadingTrivia(r.Members[i].GetLeadingTrivia()).WithTrailingTrivia(Space));
-                members.Add(r.Members[i].WithLeadingTrivia());
+                var statement = ((GlobalStatementSyntax)r.Members[i]).Statement.WithLeadingTrivia();
+                members.AddRange(WithForEachBranch(g.Statement, statement).Select(s => GlobalStatement(s)));
             }
             else
             {

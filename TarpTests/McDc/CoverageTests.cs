@@ -108,7 +108,7 @@ public class R
         c.LinesRun.Should().Contain(LineOf("if (b) throw new InvalidOperationException();"));
         c.Lines.Except(c.LinesRun).Should().Contain(new[] { LineOf("a++;"), LineOf("return a;") });
 
-        var sw = c.Switches.Single();
+        var sw = c.Switches.Single(s => s.Switch.Kind == SwitchEntry.Statement);
         (sw.Taken, sw.Total).Should().Be((1, 3));
         sw.NotTaken.Should().Equal("case 0:", "no case matched");
 
@@ -249,6 +249,87 @@ public static class T
         (guard.OutcomeTrue, guard.OutcomeFalse).Should().Be((true, false));
         var filter = p.Result("b");
         (filter.OutcomeTrue, filter.OutcomeFalse).Should().Be((true, true));
+    }
+
+    private const string More = @"
+using System;
+using System.Linq;
+public class Base { public Base(int x) { X = x; } public int X; }
+public class Derived : Base { public Derived(int x) : base(x + 1) { } }
+public class Primary(int x) : Base(x * 2) { }
+public static class Ext
+{
+    extension(int n)
+    {
+        public bool IsSmall() => n < 10 && n > -10;
+    }
+}
+public static class T
+{
+    static int[] Numbers = { 1, 2, 3 };
+    static event Action Changed = () => { };
+    public static int Arrays() { Changed(); return Numbers.Length; }
+
+    public static int Bases() => new Derived(1).X + new Primary(2).X;
+
+    public static int InMemory(int[] xs) => (from x in xs where x > 0 && x < 10 select x).Count();
+    public static int Queryable(int[] xs) => (from x in xs.AsQueryable() where x > 0 && x < 10 select x).Count();
+
+    public static int Loop(int[] xs) { var s = 0; foreach (var x in xs) s += x; return s; }
+    public static int? Length(string? s) => s?.Length;
+    public static bool Small(int n) => n.IsSmall();
+    public static bool Coupled(bool y) => y && !y;
+}";
+
+    [TestMethod]
+    public void InitializersQueriesLoopsAndNullConditionals()
+    {
+        var p = McDcEndToEndTests.Build(More);
+        p.Check("Arrays");
+        p.Check("Bases");
+        p.Check("InMemory", new[] { 5, 20 });
+        p.Check("Queryable", new[] { 5, 20 });
+        p.Check("Loop", new int[0]);
+        p.Check("Loop", new[] { 1, 2 });
+        p.Check("Length", new object?[] { null });
+        p.Check("Length", "ab");
+        p.Check("Small", 3);
+        p.Check("Coupled", true);
+
+        var c = p.Coverage();
+        int Line(string text) => LineIn(More, text);
+
+        c.LinesRun.Should().Contain(new[]
+        {
+            Line("static int[] Numbers = { 1, 2, 3 };"), Line("static event Action Changed"),
+            Line(": base(x + 1)"), Line("public class Primary(int x) : Base(x * 2)")
+        });
+
+        // over an array: instrumented; over IQueryable: an expression tree, left alone
+        p.Result("x > 0 && x < 10").Executed.Should().BeTrue();
+        p.Map.Skipped.Should().ContainSingle(s => s.Reason == "in a query that becomes an expression tree");
+
+        var loop = c.Switches.Single(s => s.Switch.Kind == SwitchEntry.ForEach);
+        (loop.Taken, loop.Total).Should().Be((2, 2));
+        var access = c.Switches.Single(s => s.Switch.Kind == SwitchEntry.ConditionalAccess);
+        (access.Taken, access.Total).Should().Be((2, 2));
+
+        p.Result("n < 10 && n > -10").Executed.Should().BeTrue();
+
+        // y && !y: y can't be true then false in one evaluation, so no test shows the second y false
+        var coupled = p.Result("y && !y").Conditions[1];
+        coupled.ShownFalse.Should().BeFalse();
+        coupled.Suggestions.Should().BeEmpty();
+    }
+
+    [TestMethod]
+    public void ForEachWithNoIterations()
+    {
+        var p = McDcEndToEndTests.Build(More);
+        p.Check("Loop", new int[0]);
+
+        var loop = p.Coverage().Switches.Single(s => s.Switch.Kind == SwitchEntry.ForEach);
+        loop.NotTaken.Should().Equal("iterated");
     }
 
     [TestMethod]

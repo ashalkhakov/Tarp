@@ -175,6 +175,9 @@ public static class McDcAnalyzer
     private static int FalseBit(int i) => 1 << 2 * i + 1;
 
     // for every missing condition value, find one test (by trying all inputs) whose evaluation shows it
+    private static string Normalize(string text) =>
+        string.Concat(text.Where(c => !char.IsWhiteSpace(c)));
+
     private static void Suggest(McDcNode tree, IReadOnlyList<MarkerFunction> markers, List<ConditionResult> conditions)
     {
         if (conditions.All(c => c.Covered))
@@ -190,13 +193,22 @@ public static class McDcAnalyzer
             if (!c.ShownFalse) missing.Add((c, FalseBit(c.Index)));
         }
 
+        // the same condition (by its text) twice: one evaluation can't have it both true and false,
+        // e.g. x > 0 && y || x > 0 (a heuristic: x > 0 and x <= 0 aren't seen as related)
+        var repeated = conditions
+            .SelectMany(a => conditions.Where(b => b.Index > a.Index && Normalize(b.Text) == Normalize(a.Text)), (a, b) => (a.Index, b.Index))
+            .ToList();
+        bool Possible(uint evaluated, uint values) => repeated.All(p =>
+            (evaluated & (1u << p.Item1)) == 0 || (evaluated & (1u << p.Item2)) == 0 ||
+            ((values >> p.Item1) & 1) == ((values >> p.Item2) & 1));
+
         var seen = new HashSet<(uint, uint)>();
         for (uint input = 0; input < 1u << n && missing.Count > 0; input++)
         {
             uint evaluated = 0;
             DecisionTree.Evaluate(tree, input, ref evaluated);
             var values = input & evaluated;
-            if (!seen.Add((evaluated, values)))
+            if (!seen.Add((evaluated, values)) || !Possible(evaluated, values))
             {
                 continue;
             }

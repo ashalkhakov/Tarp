@@ -80,12 +80,14 @@ public class FunctionEntry
     public List<int> Exits { get; set; } = new();
 }
 
-// a branch point with more than two ways: a switch statement or expression, or a ??
+// a branch point other than a decision: a switch statement or expression, ??, ?., or a foreach
 public class SwitchEntry
 {
     public const string Statement = "switch";
     public const string Expression = "switch expression";
     public const string Coalesce = "??";
+    public const string ConditionalAccess = "?.";
+    public const string ForEach = "foreach";
 
     public int Id { get; set; }
     public string Kind { get; set; } = Statement;

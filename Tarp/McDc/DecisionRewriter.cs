@@ -271,9 +271,9 @@ public class DecisionRewriter : CSharpSyntaxRewriter
 
         foreach (var a in e.Ancestors())
         {
-            if (a is QueryExpressionSyntax)
+            if (a is QueryExpressionSyntax q && IsExpressionTree(q))
             {
-                return "in a query expression";
+                return "in a query that becomes an expression tree";
             }
             if (a is AnonymousFunctionExpressionSyntax f && IsExpressionTree(f))
             {
@@ -284,9 +284,43 @@ public class DecisionRewriter : CSharpSyntaxRewriter
         return null;
     }
 
-    // in a lambda that becomes an expression tree, or a query (which may be one): no calls to the runtime there
+    // in a lambda or a query that becomes an expression tree: no calls to the runtime there
     protected bool IsInExpressionTree(SyntaxNode node) =>
-        node.AncestorsAndSelf().Any(a => a is QueryExpressionSyntax || a is AnonymousFunctionExpressionSyntax f && IsExpressionTree(f));
+        node.AncestorsAndSelf().Any(a => a is QueryExpressionSyntax q && IsExpressionTree(q) || a is AnonymousFunctionExpressionSyntax f && IsExpressionTree(f));
+
+    private readonly Dictionary<QueryExpressionSyntax, bool> _expressionTreeQueries = new();
+
+    // a query is lambdas passed to the methods its clauses bind to (Where, Select, ...): over IQueryable,
+    // those take expression trees; over in-memory collections, delegates
+    private bool IsExpressionTree(QueryExpressionSyntax query)
+    {
+        if (_expressionTreeQueries.TryGetValue(query, out var known))
+        {
+            return known;
+        }
+
+        var methods = new List<ISymbol?>();
+        foreach (var n in query.DescendantNodesAndSelf())
+        {
+            if (n is QueryClauseSyntax clause)
+            {
+                var info = _model.GetQueryClauseInfo(clause);
+                methods.Add(info.OperationInfo.Symbol);
+                methods.Add(info.CastInfo.Symbol);
+            }
+            else if (n is SelectOrGroupClauseSyntax or QueryContinuationSyntax)
+            {
+                methods.Add(_model.GetSymbolInfo(n).Symbol);
+            }
+        }
+
+        // a method that didn't bind (an error) counts as one: better not instrumented than broken
+        var result = methods.Any(m => m is IMethodSymbol method
+            ? method.Parameters.Any(p => p.Type.OriginalDefinition.ToDisplayString() == "System.Linq.Expressions.Expression<TDelegate>")
+            : false) || query.FromClause != null && _model.GetTypeInfo(query.FromClause.Expression).Type is IErrorTypeSymbol;
+        _expressionTreeQueries[query] = result;
+        return result;
+    }
 
     protected bool IsExpressionTree(AnonymousFunctionExpressionSyntax f)
     {

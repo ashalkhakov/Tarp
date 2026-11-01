@@ -76,6 +76,13 @@ namespace TarpGen
             return value;
         }
 
+        // a?.b: one probe for "not null", one for "null"
+        public static T PNN<T>(int notNull, int isNull, T value)
+        {
+            Hit(value != null ? notNull : isNull);
+            return value;
+        }
+
         public static T PN<T>(int id, T value)
         {
             if (value != null)

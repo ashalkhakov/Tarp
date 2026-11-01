@@ -150,6 +150,7 @@ public static class McDcReport
                 {
                     SwitchEntry.Expression => "arms",
                     SwitchEntry.Coalesce => "sides",
+                    SwitchEntry.ConditionalAccess or SwitchEntry.ForEach => "branches",
                     _ => "sections"
                 };
                 sb.AppendLine(CultureInfo.InvariantCulture, $"  {s.Switch.Kind} at line {s.Switch.Line}: {what} not taken: {string.Join("; ", s.NotTaken)}");
