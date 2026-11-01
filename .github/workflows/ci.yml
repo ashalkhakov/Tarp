@@ -21,20 +21,7 @@ jobs:
             8.0.x
             10.0.x
       - run: dotnet build McDcTestCoverage.sln -c Release
-      - run: dotnet test TarpTests -c Release --no-build --filter "FullyQualifiedName!~TarpTests.Cfg"
-
-  # the CFG builder is work in progress: its tests are reported, but don't fail the build
-  cfg-tests:
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: |
-            8.0.x
-            10.0.x
-      - run: dotnet test TarpTests -c Release --filter "FullyQualifiedName~TarpTests.Cfg"
+      - run: dotnet test TarpTests -c Release --no-build
 
   # the packed tool on a real solution
   e2e:

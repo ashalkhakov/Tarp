@@ -22,7 +22,7 @@ jobs:
       - name: Version from the tag
         run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
 
-      - run: dotnet test TarpTests -c Release --filter "FullyQualifiedName!~TarpTests.Cfg"
+      - run: dotnet test TarpTests -c Release
 
       - run: dotnet pack Tarp.BuildTool -c Release -o nupkg -p:Version=$VERSION
 

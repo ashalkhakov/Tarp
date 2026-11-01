@@ -62,7 +62,7 @@ instrumented.
 
 CI (`.github/workflows/ci.yml`) builds and tests on Linux and Windows, and runs `samples/e2e.sh`:
 it packs the tool, installs it into a copy of `samples/Shop`, runs `dotnet tarp test`, and checks the
-report. The CFG tests run in a job of their own that doesn't fail the build.
+report.
 
 To release, push a tag: `git tag v0.1.0 && git push origin v0.1.0`. The release workflow
 (`.github/workflows/release.yml`) takes the version from the tag, tests, packs, checks the package
