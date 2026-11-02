@@ -38,6 +38,10 @@ public class DecisionEntry
     // its structure, with c0, c1, ... for the conditions, e.g. "(c0) == ((c1) || (c2))": the report
     // rebuilds the tree from it (see DecisionTree; maps without it: from the text)
     public string? Shape { get; set; }
+    // a section of a switch statement with several case labels: its labels are its conditions, and its
+    // evaluations come from which label matched (see SwitchEntry.LabelProbes and McDcReport)
+    public int? SwitchId { get; set; }
+    public int? SwitchSection { get; set; }
     public List<string> Conditions { get; set; } = new();
 }
 
@@ -83,7 +87,7 @@ public class FunctionEntry
     public List<int> Exits { get; set; } = new();
 }
 
-// a branch point other than a decision: a switch statement or expression, ??, ?., or a foreach
+// a branch point other than a decision: a switch statement or expression, ??, ?., a foreach, or a try with catches
 public class SwitchEntry
 {
     public const string Statement = "switch";
@@ -91,6 +95,7 @@ public class SwitchEntry
     public const string Coalesce = "??";
     public const string ConditionalAccess = "?.";
     public const string ForEach = "foreach";
+    public const string Try = "try";
 
     public int Id { get; set; }
     public string Kind { get; set; } = Statement;
@@ -99,4 +104,9 @@ public class SwitchEntry
     // per section: its labels, and the probe of its first statement
     public List<string> Labels { get; set; } = new();
     public List<int> Sections { get; set; } = new();
+    // switch statements, per section: the probe of each case label (in its when), run when that label
+    // matched (no sections: the labels aren't probed, e.g. because of goto case); and the probe of
+    // "no case matched" (-1: none, or it can't happen)
+    public List<List<int>> LabelProbes { get; set; } = new();
+    public int NoMatchProbe { get; set; } = -1;
 }

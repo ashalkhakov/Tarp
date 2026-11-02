@@ -39,30 +39,35 @@ public static class McDcHits
         }
     }
 
-    // version 1: decisions only; version 2: also probes
+    // version 1: decisions only; 2: also the probes that ran; 3: also how many times
     internal static bool IsFor(string headerLine, string moduleId)
     {
         var header = headerLine.Split(' ');
-        if (header.Length != 3 || header[0] != "tarp-mcdc" || header[1] is not ("1" or "2"))
+        if (header.Length != 3 || header[0] != "tarp-mcdc" || header[1] is not ("1" or "2" or "3"))
         {
             throw new FormatException("not a Tarp MC/DC hits file");
         }
         return header[2] == moduleId;
     }
 
-    // the probes that ran
-    public static IEnumerable<int> ParseProbes(string text, string moduleId)
+    // the probes that ran, and how many times ("p <id>" in version 2: once)
+    public static IEnumerable<(int Id, long Count)> ParseProbes(string text, string moduleId)
     {
         var lines = text.Split('\n', StringSplitOptions.RemoveEmptyEntries);
         if (lines.Length == 0 || !IsFor(lines[0], moduleId))
         {
-            return Enumerable.Empty<int>();
+            return Enumerable.Empty<(int, long)>();
         }
         return lines.Skip(1)
             .Where(l => l.StartsWith("p ", StringComparison.Ordinal))
-            .Select(l => int.Parse(l[2..], CultureInfo.InvariantCulture))
+            .Select(l => l.Split(' '))
+            .Select(f => (int.Parse(f[1], CultureInfo.InvariantCulture), f.Length > 2 ? long.Parse(f[2], CultureInfo.InvariantCulture) : 1L))
             .ToList();
     }
+
+    // the counts of several runs (hits files), added up
+    public static Dictionary<int, long> Sum(IEnumerable<(int Id, long Count)> probes) =>
+        probes.GroupBy(p => p.Id).ToDictionary(g => g.Key, g => g.Sum(p => p.Count));
 
     public static IEnumerable<McDcHit> LoadDirectory(string directory, string moduleId) =>
         Directory.Exists(directory)

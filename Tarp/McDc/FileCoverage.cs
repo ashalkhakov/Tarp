@@ -31,6 +31,8 @@ public class FileCoverage
     public string File { get; init; } = "";
     public HashSet<int> Lines { get; } = new();
     public HashSet<int> LinesRun { get; } = new();
+    // how many times each line ran: the most of the innermost probes on it
+    public Dictionary<int, long> LineCounts { get; } = new();
     public List<FunctionCoverage> Functions { get; } = new();
     public List<SwitchCoverage> Switches { get; } = new();
     public List<DecisionResult> Decisions { get; } = new();
@@ -57,9 +59,14 @@ public class FileCoverage
                 var covering = file.Where(p => p.Line <= line && line <= p.EndLine).ToList();
                 var innermost = covering.Min(p => p.EndLine - p.Line);
                 f.Lines.Add(line);
-                if (covering.Any(p => p.EndLine - p.Line == innermost && ran.Contains(p.Id)))
+                var count = covering.Where(p => p.EndLine - p.Line == innermost && ran.Contains(p.Id))
+                    .Select(p => module.Counts.TryGetValue(p.Id, out var c) ? c : 1)
+                    .DefaultIfEmpty(0)
+                    .Max();
+                if (count > 0)
                 {
                     f.LinesRun.Add(line);
+                    f.LineCounts[line] = count;
                 }
             }
         }

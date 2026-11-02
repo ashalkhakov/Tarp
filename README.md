@@ -6,8 +6,8 @@ Tarp is a test coverage measurement tool for C#.
 
 From one run of your tests, in source terms (what you wrote, not the compiled IL):
 
-- **Lines**: a probe runs right before each statement, and a statement's lines count as run once it
-  has started, so a call that throws doesn't make the lines after it look run. A compound statement's
+- **Lines**: a probe runs right before each statement, and counts how many times; a statement's lines
+  count as run once it has started, so a call that throws doesn't make the lines after it look run. A compound statement's
   probe covers its header (`if (...)`, `switch (...)`); its body has probes of its own. So do the
   condition of a `do ... while`, lambda bodies, switch expression arms, and field and property
   initializers: a line belongs to the innermost probe around it, so a lambda or an arm that never ran
@@ -16,13 +16,15 @@ From one run of your tests, in source terms (what you wrote, not the compiled IL
   end of the body when it can be reached. Methods, constructors, accessors, operators, local
   functions and top-level statements count; lambdas don't (their statements are still lines).
 - **Branches**: both outcomes of every decision (including `when` guards and `catch` filters), every
-  `switch` section (including "no case matched" for a switch without a `default`), every switch
-  expression arm, both sides of `??`, null and not null for `?.` and `?[]`, and whether a `foreach`
-  iterated at all.
+  `switch` section (including "no case matched" for a switch without a `default`, when some value can
+  match none), every switch expression arm, both sides of `??`, null and not null for `?.` and `?[]`,
+  whether a `foreach` iterated at all, and for a `try` with `catch` clauses: each catch clause, and the
+  try block completing without an exception (where its end can be reached).
 - **Conditions**: each condition of each decision seen both true and false. A decision is a boolean
   expression with `&&`, `||`, `!`, and on bools `&`, `|`, `^`, `==`, `!=` and `?:` (as DO-178C counts
-  them), and the primitive patterns of an `is` with `and`/`or`/`not` (`x is > 0 and < 10` has two
-  conditions).
+  them), the primitive patterns of an `is` with `and`/`or`/`not` (`x is > 0 and < 10` has two
+  conditions), and the case labels of a `switch` section with several (`case 1: case 2:` is a decision,
+  "this section is taken", with two conditions; not in a switch with `goto case`).
 - **MC/DC**: each condition shown to independently affect its decision's outcome (masking MC/DC).
 
 ## MC/DC

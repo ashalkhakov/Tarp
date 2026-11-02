@@ -256,18 +256,123 @@ public sealed class CoverageRewriter : DecisionRewriter
         var rewritten = (SwitchStatementSyntax)base.VisitSwitchStatement(node)!;
         _switches.Pop();
 
-        if (!node.Sections.Any(s => s.Labels.Any(l => l is DefaultSwitchLabelSyntax)))
+        var guarded = CanProbeLabels(node);
+        if (guarded)
         {
-            // no change to what the switch does: without a default, no match goes past the switch too
+            rewritten = ProbeLabels(node, rewritten, entry);
+        }
+
+        // without a default, no match goes past the switch: a default that does the same changes nothing.
+        // A switch that matches everything (switch (b) { case true: ... case false: ... }) has no such
+        // branch, and the end can't be reached: a default that breaks would change that, so none is added;
+        // with labels probed (guarded labels don't count for that), one that throws, which never runs
+        var hasDefault = node.Sections.Any(s => s.Labels.Any(l => l is DefaultSwitchLabelSyntax));
+        if (!hasDefault && SwitchEndIsReachable(node))
+        {
             var id = NewProbe(node, OwnSpan(node), ProbeEntry.NoCaseMatched);
-            var section = SwitchSection(
-                SingletonList<SwitchLabelSyntax>(DefaultSwitchLabel().WithTrailingTrivia(Space)),
-                List(new[] { ProbeStatement(id).WithTrailingTrivia(Space), ParseStatement("break;").WithTrailingTrivia(Space) }));
-            rewritten = rewritten.AddSections(section);
+            rewritten = rewritten.AddSections(DefaultSection(ProbeStatement(id), ParseStatement("break;")));
             entry.Labels.Add("no case matched");
             entry.Sections.Add(id);
+            entry.NoMatchProbe = id;
+        }
+        else if (!hasDefault && guarded)
+        {
+            rewritten = rewritten.AddSections(DefaultSection(ParseStatement("throw new global::System.InvalidOperationException(\"Tarp: no case matched\");")));
+        }
+        else if (hasDefault && guarded)
+        {
+            // a default section of its own (CanProbeLabels): entered only when no case matched
+            var defaultSection = node.Sections.First(s => s.Labels.Any(l => l is DefaultSwitchLabelSyntax));
+            var first = defaultSection.Statements.FirstOrDefault(_firstProbe.ContainsKey);
+            entry.NoMatchProbe = first != null ? _firstProbe[first] : -1;
         }
         return rewritten;
+    }
+
+    private static SwitchSectionSyntax DefaultSection(params StatementSyntax[] statements) =>
+        SwitchSection(
+            SingletonList<SwitchLabelSyntax>(DefaultSwitchLabel().WithTrailingTrivia(Space)),
+            List(statements.Select(s => s.WithTrailingTrivia(Space))));
+
+    private bool SwitchEndIsReachable(SwitchStatementSyntax node)
+    {
+        try
+        {
+            return Model.AnalyzeControlFlow(node)?.EndPointIsReachable ?? true;
+        }
+        catch (ArgumentException)
+        {
+            return true;
+        }
+    }
+
+    /*
+     * Case labels as conditions (MC/DC over case labels): each case label gets a probe in its when,
+     * run when the label matched. Not when the labels must stay as they are: goto case needs a
+     * "case c:" label, and a section with both default and case labels wouldn't tell "no case matched"
+     */
+    private bool CanProbeLabels(SwitchStatementSyntax node) =>
+        !node.DescendantNodes().OfType<GotoStatementSyntax>().Any(g => g.IsKind(SyntaxKind.GotoCaseStatement) &&
+            g.Ancestors().OfType<SwitchStatementSyntax>().FirstOrDefault() == node) &&
+        !node.Sections.Any(s => s.Labels.Any(l => l is DefaultSwitchLabelSyntax) && s.Labels.Count > 1) &&
+        !IsInExpressionTree(node);
+
+    // case c:  ->  case c when PT(id):     case p when g:  ->  case p when (g) && PT(id):
+    private SwitchStatementSyntax ProbeLabels(SwitchStatementSyntax original, SwitchStatementSyntax rewritten, SwitchEntry entry)
+    {
+        var sections = new List<SwitchSectionSyntax>();
+        for (var s = 0; s < original.Sections.Count; s++)
+        {
+            var o = original.Sections[s];
+            var r = rewritten.Sections[s];
+            var probes = new List<int>();
+            var labels = new List<SwitchLabelSyntax>();
+            for (var l = 0; l < o.Labels.Count; l++)
+            {
+                if (o.Labels[l] is DefaultSwitchLabelSyntax)
+                {
+                    labels.Add(r.Labels[l]);
+                    continue;
+                }
+                var id = NewProbe(o.Labels[l], o.Labels[l].Span, ProbeEntry.Branch);
+                probes.Add(id);
+                labels.Add(r.Labels[l] switch
+                {
+                    CaseSwitchLabelSyntax c => CasePatternSwitchLabel(
+                            c.Keyword, ConstantPattern(c.Value.WithoutTrailingTrivia()),
+                            WhenClause(ParseExpression($"{Runtime}.PT({id})")).WithWhenKeyword(Token(SyntaxKind.WhenKeyword).WithLeadingTrivia(Space).WithTrailingTrivia(Space)),
+                            c.ColonToken),
+                    CasePatternSwitchLabelSyntax { WhenClause: null } c => c
+                        .WithPattern(c.Pattern.WithoutTrailingTrivia())
+                        .WithWhenClause(WhenClause(ParseExpression($"{Runtime}.PT({id})")).WithWhenKeyword(Token(SyntaxKind.WhenKeyword).WithLeadingTrivia(Space).WithTrailingTrivia(Space))),
+                    CasePatternSwitchLabelSyntax c => c.WithWhenClause(c.WhenClause!.WithCondition(Probed($"__tarpValue && {Runtime}.PT({id})", c.WhenClause.Condition))),
+                    var other => other
+                });
+            }
+            entry.LabelProbes.Add(probes);
+            sections.Add(r.WithLabels(List(labels)));
+
+            // a section with several case labels: a decision, its labels the conditions
+            if (probes.Count > 1)
+            {
+                var lineSpan = o.GetLocation().GetLineSpan().StartLinePosition;
+                var texts = o.Labels.Where(x => x is not DefaultSwitchLabelSyntax).Select(x => x.ToString().Trim().TrimEnd(':').TrimEnd()).ToList();
+                Map.Decisions.Add(new DecisionEntry
+                {
+                    Id = Map.Decisions.Count,
+                    File = DisplayPath,
+                    Line = lineSpan.Line + 1,
+                    Column = lineSpan.Character + 1,
+                    SpanStart = o.SpanStart,
+                    Text = string.Join(" ", o.Labels.Select(x => x.ToString().Trim())),
+                    Shape = string.Join(" || ", texts.Select((_, i) => $"(c{i})")),
+                    Conditions = texts,
+                    SwitchId = entry.Id,
+                    SwitchSection = s
+                });
+            }
+        }
+        return rewritten.WithSections(List(sections));
     }
 
     public override SyntaxNode? VisitSwitchSection(SwitchSectionSyntax node)
@@ -287,6 +392,45 @@ public sealed class CoverageRewriter : DecisionRewriter
             entry.Sections.Add(first != null ? _firstProbe[first] : -1);
         }
         return rewritten.WithStatements(statements);
+    }
+
+    /*
+     * try with catches: each catch clause is a branch (its first statement ran), and so is "completed
+     * without an exception" (a probe after the try block's last statement) when that end can be reached.
+     * Not counted: which way a finally was entered, or a function left by an exception it didn't catch
+     * (both would need handlers of Tarp's own around the code: see issue #9).
+     */
+    public override SyntaxNode? VisitTryStatement(TryStatementSyntax node)
+    {
+        var rewritten = (TryStatementSyntax)base.VisitTryStatement(node)!;
+        if (node.Catches.Count == 0 || IsExcludedFromCoverage(node))
+        {
+            return rewritten;
+        }
+
+        var entry = new SwitchEntry { Id = Map.Switches.Count, File = DisplayPath, Line = Line(node), Kind = SwitchEntry.Try };
+        Map.Switches.Add(entry);
+
+        if (EndIsReachable(node.Block))
+        {
+            var id = NewProbe(node, node.Block.CloseBraceToken.Span, ProbeEntry.Branch);
+            entry.Labels.Add("completed without an exception");
+            entry.Sections.Add(id);
+            rewritten = rewritten.WithBlock(Append(rewritten.Block, ProbeStatement(id)));
+        }
+        foreach (var c in node.Catches)
+        {
+            entry.Labels.Add("catch" + (c.Declaration != null ? " " + c.Declaration : "") + (c.Filter != null ? " " + c.Filter : ""));
+            entry.Sections.Add(_firstProbe.TryGetValue(c.Block, out var first) ? first : -1);
+        }
+        return rewritten;
+    }
+
+    // a statement at the end of a block, on the line of its }
+    private static BlockSyntax Append(BlockSyntax block, StatementSyntax statement)
+    {
+        var last = statement.WithLeadingTrivia(block.Statements.Count == 0 ? TriviaList(Space) : block.CloseBraceToken.LeadingTrivia).WithTrailingTrivia(Space);
+        return block.WithStatements(block.Statements.Add(last)).WithCloseBraceToken(block.CloseBraceToken.WithLeadingTrivia());
     }
 
     // lambdas: probes in block bodies, but not functions of their own
