@@ -16,10 +16,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
-          # 8: Tarp and its tests; 10: the SDK, and the sample's target framework
-          dotnet-version: |
-            8.0.x
-            10.0.x
+          dotnet-version: 10.0.x
       - run: dotnet build McDcTestCoverage.sln -c Release
       - run: dotnet test TarpTests -c Release --no-build
 
@@ -31,9 +28,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: |
-            8.0.x
-            10.0.x
+          dotnet-version: 10.0.x
       - name: LLVM 18 (clang's -fcoverage-mcdc, llvm-cov --show-mcdc)
         run: sudo apt-get update && sudo apt-get install -y clang-18 llvm-18
       - run: python3 -I crosscheck/crosscheck.py crosscheck/tarp-runner "$RUNNER_TEMP/crosscheck"
@@ -53,9 +48,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: |
-            8.0.x
-            10.0.x
+          dotnet-version: 10.0.x
       # lcov 2.6 (Ubuntu's is older, without MC/DC), to check that it reads Tarp's tracefile
       - name: Install lcov
         if: runner.os == 'Linux'
