@@ -227,7 +227,7 @@ public class McDcBuildInstrumenter
             var rewriter = new CoverageRewriter(compilation.GetSemanticModel(tree), map, DisplayPath(request, tree.FilePath), excluded[tree.FilePath],
                 request.ExceptionExits);
             var root = (CompilationUnitSyntax)rewriter.Visit(tree.GetRoot())!;
-            var text = McDcProjectInstrumenter.WithPrologue(root, tree.FilePath).ToFullString();
+            var text = McDcProjectInstrumenter.WithPrologue(root, tree.FilePath, compilation.Options.NullableContextOptions).ToFullString();
 
             rewritten[tree] = CSharpSyntaxTree.ParseText(text, parseOptions, InstrumentedPath(request, tree.FilePath), Encoding.UTF8);
             for (var id = first; id < map.Decisions.Count; id++)
