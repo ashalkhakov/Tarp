@@ -47,9 +47,12 @@ Tarp measures masking MC/DC (modified condition/decision coverage) of the code y
 Install the tool and run your tests through it:
 
 ```sh
-dotnet tool install -g dotnet-tarp   # from nuget.org, once a release is published there
+dotnet tool install -g dotnet-tarp   # from nuget.org
 dotnet tarp test                     # takes the same arguments as dotnet test
 ```
+
+The tool runs on .NET 10 or newer. The projects it tests can target older frameworks: it
+instruments their sources, and their own SDK builds them.
 
 Without nuget.org, download `dotnet-tarp.<version>.nupkg` from a GitHub release into a directory
 and add `--add-source <directory>` to the install command. `dotnet pack Tarp.BuildTool` makes the
