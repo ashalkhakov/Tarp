@@ -32,10 +32,44 @@ public class CoverageGateTests
         var (passed, text) = CoverageGate.Check(modules, new CoverageThresholds(McDc: 100), exclusions);
         passed.Should().BeTrue();
         text.Should().Contain("(2 exclusions)").And.MatchRegex(@"MC/DC +0/0 +100.0%")
-            .And.Contain("exclusion matches nothing: Other/**/*.cs");
+            .And.Contain("1 exclusion leaves out no gap").And.Contain("    Other/**/*.cs");
 
         (passed, _) = CoverageGate.Check(modules, new CoverageThresholds(Lines: 100, Branches: 100), CoverageExclusions.Parse(new[] { "*.cs" }));
         passed.Should().BeTrue();
+    }
+
+    // a condition entry leaves out that condition only: b, shown, is still checked
+    [TestMethod]
+    public void ExclusionsOfConditions()
+    {
+        var modules = ReportFormatsTests.Run();
+        var decision = ReportFormatsTests.LineOf("if (a && b)");
+
+        var (passed, text) = CoverageGate.Check(modules, new CoverageThresholds(McDc: 100), CoverageExclusions.Parse(new[] { $"T.cs:{decision}   a" }));
+        passed.Should().BeTrue();
+        text.Should().MatchRegex(@"MC/DC +1/1 +100.0%").And.NotContain("no gap");
+    }
+
+    // as a ratchet: an entry with nothing left to exclude (here b is shown; line 'return true;' ran, and
+    // lines aren't checked anyway) is listed, and with strict fails the gate
+    [TestMethod]
+    public void ExclusionsWithNoGapLeft()
+    {
+        var modules = ReportFormatsTests.Run();
+        var decision = ReportFormatsTests.LineOf("if (a && b)");
+        var exclusions = CoverageExclusions.Parse(new[]
+        {
+            $"T.cs:{decision} a", $"T.cs:{decision} b", $"T.cs:{ReportFormatsTests.LineOf("return true;")}"
+        });
+
+        var (passed, text) = CoverageGate.Check(modules, new CoverageThresholds(McDc: 100), exclusions);
+        passed.Should().BeTrue();
+        text.Should().Contain("2 exclusions leave out no gap (covered now, or no such code); remove them")
+            .And.Contain($"    T.cs:{decision} b\n").And.NotContain($"    T.cs:{decision} a\n");
+
+        (passed, text) = CoverageGate.Check(modules, new CoverageThresholds(McDc: 100), exclusions, strict: true);
+        passed.Should().BeFalse();
+        text.Should().Contain(": FAILED, remove them");
     }
 
     [TestMethod]
