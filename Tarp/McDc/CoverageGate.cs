@@ -8,31 +8,29 @@ using System.Text.RegularExpressions;
 namespace Tarp.McDc;
 
 /*
- * What's left out of the gate, one entry a line, as the reports name files (# starts a comment):
+ * What's left out of the gate, one entry a line, as the reports name files and conditions (# starts a
+ * comment):
  *
- *   Shop.Core/Legacy/*.cs     whole files: * within a directory, ** across directories, ? one character
- *   Shop.Core/Orders.cs:68    everything on a line: its lines, its decisions' outcomes and conditions,
- *                             its branch points
+ *   Shop.Core/Legacy/*.cs                  whole files: * within a directory, ** across directories,
+ *                                          ? one character
+ *   Shop.Core/Orders.cs:68                 everything on a line: its lines, its decisions' outcomes and
+ *                                          conditions, its branch points
+ *   Shop.Core/Orders.cs:68 day.Year == y   one condition of the decisions on a line (MC/DC only)
  *
  * Only the gate leaves them out: the reports still show them.
  */
 public sealed class CoverageExclusions
 {
-    private sealed record Entry(string Text, Regex File, int? Line)
-    {
-        public bool Used { get; set; }
-    }
+    public sealed record Entry(string Text, Regex File, int? Line, string? Condition);
 
-    private readonly List<Entry> _entries;
+    // path, then :line, then the condition after a space
+    private static readonly Regex Syntax = new(@"^(?<path>.+?)(:(?<line>\d+)(\s+(?<condition>.+))?)?$", RegexOptions.CultureInvariant);
 
-    private CoverageExclusions(List<Entry> entries) => _entries = entries;
+    private CoverageExclusions(List<Entry> entries) => Entries = entries;
 
     public static readonly CoverageExclusions None = new(new List<Entry>());
 
-    public int Count => _entries.Count;
-
-    // the entries that matched nothing: stale, once their code has been fixed or moved
-    public IEnumerable<string> Unused => _entries.Where(e => !e.Used).Select(e => e.Text);
+    public IReadOnlyList<Entry> Entries { get; }
 
     public static CoverageExclusions Parse(IEnumerable<string> lines)
     {
@@ -45,33 +43,28 @@ public sealed class CoverageExclusions
             {
                 continue;
             }
-            var colon = text.LastIndexOf(':');
-            int? line = null;
-            var path = text;
-            if (colon > 0 && int.TryParse(text[(colon + 1)..], NumberStyles.None, CultureInfo.InvariantCulture, out var n))
-            {
-                line = n;
-                path = text[..colon];
-            }
-            entries.Add(new Entry(text, Glob(path.Replace('\\', '/')), line));
+            var m = Syntax.Match(text);
+            entries.Add(new Entry(text, Glob(m.Groups["path"].Value.Replace('\\', '/')),
+                m.Groups["line"].Success ? int.Parse(m.Groups["line"].Value, CultureInfo.InvariantCulture) : null,
+                m.Groups["condition"].Success ? McDcReport.OneLine(m.Groups["condition"].Value) : null));
         }
         return new CoverageExclusions(entries);
     }
 
-    public bool ExcludesFile(string file) => Match(file, null);
+    // the whole-file entries for a file, the whole-line entries for a line of it, and a condition's entries
+    public IReadOnlyList<Entry> ForFile(string file) => Matching(file, e => e.Line == null);
 
-    public bool ExcludesLine(string file, int line) => Match(file, line);
+    public IReadOnlyList<Entry> ForLine(string file, int line) => Matching(file, e => e.Line == line && e.Condition == null);
 
-    private bool Match(string file, int? line)
+    public IReadOnlyList<Entry> ForCondition(string file, int line, string condition) =>
+        Matching(file, e => e.Line == line && e.Condition == McDcReport.OneLine(condition));
+
+    public bool ExcludesFile(string file) => ForFile(file).Count > 0;
+
+    private List<Entry> Matching(string file, Func<Entry, bool> where)
     {
         var path = file.Replace('\\', '/');
-        var matched = false;
-        foreach (var e in _entries.Where(e => (e.Line == null || e.Line == line) && e.File.IsMatch(path)))
-        {
-            e.Used = true;
-            matched = true;
-        }
-        return matched;
+        return Entries.Where(e => where(e) && e.File.IsMatch(path)).ToList();
     }
 
     private static Regex Glob(string pattern)
@@ -103,32 +96,80 @@ public sealed record CoverageThresholds(double? Lines = null, double? Branches =
 /*
  * The coverage gate: fails when lines, branches or MC/DC (conditions shown, as in the reports) are
  * below their minimum, counting without what the exclusions leave out.
+ *
+ * As a ratchet, the exclusions should only shrink: an entry that leaves out no gap of a checked metric
+ * (its code is covered now, or gone) is listed, and with strict, fails the gate.
  */
 public static class CoverageGate
 {
-    public static (bool Passed, string Text) Check(IReadOnlyList<ModuleResult> modules, CoverageThresholds thresholds, CoverageExclusions exclusions)
+    public static (bool Passed, string Text) Check(IReadOnlyList<ModuleResult> modules, CoverageThresholds thresholds, CoverageExclusions exclusions,
+        bool strict = false)
     {
         int lines = 0, linesRun = 0, branches = 0, taken = 0, conditions = 0, shown = 0;
+        // the entries that left out a gap
+        var needed = new HashSet<CoverageExclusions.Entry>();
+        void Gap(IEnumerable<CoverageExclusions.Entry> entries, bool gap)
+        {
+            if (gap)
+            {
+                needed.UnionWith(entries);
+            }
+        }
+        bool LineGap(FileCoverage f, int line) => thresholds.Lines != null && !f.LinesRun.Contains(line);
+        bool DecisionGap(DecisionResult d) =>
+            thresholds.Branches != null && !(d.OutcomeTrue && d.OutcomeFalse) || thresholds.McDc != null && d.Conditions.Any(c => !c.Covered);
+        bool SwitchGap(SwitchCoverage s) => thresholds.Branches != null && s.Taken < s.Total;
+
         foreach (var f in modules.SelectMany(FileCoverage.Of))
         {
-            if (exclusions.ExcludesFile(f.File))
+            var forFile = exclusions.ForFile(f.File);
+            if (forFile.Count > 0)
             {
+                Gap(forFile, f.Lines.Any(l => LineGap(f, l)) || f.Decisions.Any(DecisionGap) || f.Switches.Any(SwitchGap));
                 continue;
             }
-            bool Kept(int line) => !exclusions.ExcludesLine(f.File, line);
 
-            var kept = f.Lines.Where(Kept).ToList();
-            lines += kept.Count;
-            linesRun += kept.Count(f.LinesRun.Contains);
-            foreach (var d in f.Decisions.Where(d => Kept(d.Decision.Line)))
+            foreach (var line in f.Lines)
             {
+                var forLine = exclusions.ForLine(f.File, line);
+                if (forLine.Count > 0)
+                {
+                    Gap(forLine, LineGap(f, line));
+                    continue;
+                }
+                lines++;
+                linesRun += f.LinesRun.Contains(line) ? 1 : 0;
+            }
+            foreach (var d in f.Decisions)
+            {
+                var forLine = exclusions.ForLine(f.File, d.Decision.Line);
+                if (forLine.Count > 0)
+                {
+                    Gap(forLine, DecisionGap(d));
+                    continue;
+                }
                 branches += 2;
                 taken += (d.OutcomeTrue ? 1 : 0) + (d.OutcomeFalse ? 1 : 0);
-                conditions += d.Conditions.Count;
-                shown += d.Conditions.Count(c => c.Covered);
+                foreach (var c in d.Conditions)
+                {
+                    var forCondition = exclusions.ForCondition(f.File, d.Decision.Line, c.Text);
+                    if (forCondition.Count > 0)
+                    {
+                        Gap(forCondition, thresholds.McDc != null && !c.Covered);
+                        continue;
+                    }
+                    conditions++;
+                    shown += c.Covered ? 1 : 0;
+                }
             }
-            foreach (var s in f.Switches.Where(s => Kept(s.Switch.Line)))
+            foreach (var s in f.Switches)
             {
+                var forLine = exclusions.ForLine(f.File, s.Switch.Line);
+                if (forLine.Count > 0)
+                {
+                    Gap(forLine, SwitchGap(s));
+                    continue;
+                }
                 branches += s.Total;
                 taken += s.Taken;
             }
@@ -136,7 +177,7 @@ public static class CoverageGate
 
         var sb = new StringBuilder();
         var passed = true;
-        sb.Append(CultureInfo.InvariantCulture, $"Tarp: coverage gate{(exclusions.Count > 0 ? $" ({exclusions.Count} exclusions)" : "")}\n");
+        sb.Append(CultureInfo.InvariantCulture, $"Tarp: coverage gate{(exclusions.Entries.Count > 0 ? $" ({exclusions.Entries.Count} exclusions)" : "")}\n");
         void Row(string name, int covered, int total, double? minimum)
         {
             if (minimum == null)
@@ -152,9 +193,17 @@ public static class CoverageGate
         Row("Lines", linesRun, lines, thresholds.Lines);
         Row("Branches", taken, branches, thresholds.Branches);
         Row("MC/DC", shown, conditions, thresholds.McDc);
-        foreach (var e in exclusions.Unused)
+
+        var stale = exclusions.Entries.Where(e => !needed.Contains(e)).ToList();
+        if (stale.Count > 0)
         {
-            sb.Append(CultureInfo.InvariantCulture, $"  exclusion matches nothing: {e}\n");
+            sb.Append(CultureInfo.InvariantCulture,
+                $"  {(stale.Count == 1 ? "1 exclusion leaves" : $"{stale.Count} exclusions leave")} out no gap (covered now, or no such code){(strict ? ": FAILED, remove them" : "; remove them")}:\n");
+            foreach (var e in stale)
+            {
+                sb.Append(CultureInfo.InvariantCulture, $"    {e.Text}\n");
+            }
+            passed &= !strict;
         }
         return (passed, sb.ToString());
     }

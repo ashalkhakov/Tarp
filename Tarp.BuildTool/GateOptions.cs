@@ -4,10 +4,10 @@ using Tarp.McDc;
 namespace Tarp.BuildTool;
 
 // the coverage gate's minimums and exclusions file, from the command line
-internal sealed record GateOptions(CoverageThresholds Thresholds, string? Exclusions)
+internal sealed record GateOptions(CoverageThresholds Thresholds, string? Exclusions, bool Strict)
 {
-    public static GateOptions Parse(string? lines, string? branches, string? mcdc, string? exclusions) =>
-        new(new CoverageThresholds(Percent(lines, "lines"), Percent(branches, "branches"), Percent(mcdc, "MC/DC")), exclusions);
+    public static GateOptions Parse(string? lines, string? branches, string? mcdc, string? exclusions, bool strict) =>
+        new(new CoverageThresholds(Percent(lines, "lines"), Percent(branches, "branches"), Percent(mcdc, "MC/DC")), exclusions, strict);
 
     // true when it passes (or isn't asked for); prints the gate's numbers
     public bool Check(IReadOnlyList<ModuleResult> modules)
@@ -17,7 +17,7 @@ internal sealed record GateOptions(CoverageThresholds Thresholds, string? Exclus
             return true;
         }
         var exclusions = Exclusions == null ? CoverageExclusions.None : CoverageExclusions.Parse(File.ReadAllLines(Exclusions));
-        var (passed, text) = CoverageGate.Check(modules, Thresholds, exclusions);
+        var (passed, text) = CoverageGate.Check(modules, Thresholds, exclusions, Strict);
         Console.WriteLine();
         Console.Write(text);
         return passed;

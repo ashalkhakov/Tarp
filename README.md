@@ -114,18 +114,23 @@ true and false, and a test that would show what's missing. "no pair" is a condit
 `--tarp-fail-under-mcdc <percent>` make `dotnet tarp test` fail (exit code 1, after writing the
 reports) when the coverage is below the minimum; failing tests fail it as before. MC/DC is the share
 of conditions shown, as in the summary. `--tarp-exclusions <file>` leaves known gaps out of the gate
-(not out of the reports), one a line, with paths as the reports name the files:
+(not out of the reports), one a line, with paths and conditions as the reports name them:
 
 ```
 # generated, tested elsewhere
 Shop.Core/Generated/**/*.cs
 # a defensive check that can't fail: everything on line 68 (its lines, decisions, branch points)
 Shop.Core/Orders.cs:68
+# one condition of the decisions on line 91: the others there are still checked
+Shop.Core/Orders.cs:91 day.Year == month.Year
 ```
 
-`*` matches within a directory, `**` across directories. The gate prints its numbers, and the
-exclusions that matched nothing (stale ones, once the code has changed). `dotnet tarp mcdc-report`
-takes the same options without `tarp-`: `--fail-under-mcdc 95 --exclusions exclusions.txt`.
+`*` matches within a directory, `**` across directories. A condition entry leaves out MC/DC only; the
+line's outcomes and branch points need a line entry. The gate prints its numbers, and the exclusions
+that leave out no gap of a checked metric: closed by a test since, or no code there.
+`--tarp-strict-exclusions` makes those fail the gate, so that the list can only shrink: a ratchet.
+`dotnet tarp mcdc-report` takes the same options without `tarp-`: `--fail-under-mcdc 95
+--exclusions exclusions.txt --strict-exclusions`.
 
 ### In Azure DevOps
 
@@ -142,7 +147,8 @@ steps:
     --tarp-cobertura $(Agent.TempDirectory)/coverage/cobertura.xml
     --tarp-markdown $(Agent.TempDirectory)/coverage/coverage.md
     --tarp-html $(Agent.TempDirectory)/coverage/index.html
-    --tarp-fail-under-mcdc 95 --tarp-exclusions coverage-exclusions.txt
+    --tarp-fail-under-mcdc 100 --tarp-fail-under-branches 100
+    --tarp-exclusions coverage-exclusions.txt --tarp-strict-exclusions
   displayName: Test with coverage
 - task: PublishTestResults@2
   condition: succeededOrFailed()

@@ -67,8 +67,20 @@ if dotnet tarp mcdc-report -r gate-report.txt --fail-under-mcdc 50 > gate.txt; t
 fi
 grep -E "MC/DC +5/11 +45\.5%  minimum 50%  FAILED" gate.txt
 printf '# known gaps\nShop.Core/Orders.cs:18\nShop.Core/Orders.cs:24\n' > exclusions.txt
-dotnet tarp mcdc-report -r gate-report.txt --fail-under-mcdc 50 --fail-under-lines 100 --exclusions exclusions.txt | tee gate.txt
+dotnet tarp mcdc-report -r gate-report.txt --fail-under-mcdc 50 --fail-under-lines 100 --exclusions exclusions.txt --strict-exclusions | tee gate.txt
 grep -E "MC/DC +4/7 +57\.1%  minimum 50%  ok" gate.txt
+# conditions instead of line 18: its shown id != null is still checked, 5/8. inStock (line 12) is
+# shown, so with --strict-exclusions an entry for it fails the gate
+printf 'Shop.Core/Orders.cs:18 id.Length < 20\nShop.Core/Orders.cs:18 OrderId().IsMatch(id)\nShop.Core/Orders.cs:24\n' > exclusions.txt
+dotnet tarp mcdc-report -r gate-report.txt --fail-under-mcdc 50 --exclusions exclusions.txt --strict-exclusions | tee gate.txt
+grep -E "MC/DC +5/8 +62\.5%  minimum 50%  ok" gate.txt
+echo 'Shop.Core/Orders.cs:12 inStock' >> exclusions.txt
+if dotnet tarp mcdc-report -r gate-report.txt --fail-under-mcdc 50 --exclusions exclusions.txt --strict-exclusions > gate.txt; then
+    echo "error: --strict-exclusions passed with an exclusion that leaves out no gap" >&2
+    exit 1
+fi
+grep -F "1 exclusion leaves out no gap (covered now, or no such code): FAILED, remove them" gate.txt
+grep -Fx "    Shop.Core/Orders.cs:12 inStock" gate.txt
 if [ -n "${GENHTML:-}" ]; then
     "$GENHTML" --branch-coverage --mcdc-coverage coverage.info -o html 2>&1 | tee genhtml.txt
     grep -E "lines\.*: 100\.0% \(10 of 10 lines\)" genhtml.txt

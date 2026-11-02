@@ -50,12 +50,13 @@ internal class Program
                 var failLines = cmd.Option("--tarp-fail-under-lines <PERCENT>", "Fail when line coverage is below this", CommandOptionType.SingleValue);
                 var failBranches = cmd.Option("--tarp-fail-under-branches <PERCENT>", "Fail when branch coverage is below this", CommandOptionType.SingleValue);
                 var failMcDc = cmd.Option("--tarp-fail-under-mcdc <PERCENT>", "Fail when MC/DC (conditions shown) is below this", CommandOptionType.SingleValue);
-                var exclusions = cmd.Option("--tarp-exclusions <FILE>", "Files and lines the fail-under checks leave out (path glob, or path:line, one a line)", CommandOptionType.SingleValue);
+                var exclusions = cmd.Option("--tarp-exclusions <FILE>", "What the fail-under checks leave out, one a line: a path glob, path:line, or path:line condition", CommandOptionType.SingleValue);
+                var strict = cmd.Option("--tarp-strict-exclusions", "Fail when an exclusion leaves out no gap (so the list can only shrink)", CommandOptionType.NoValue);
 
                 cmd.OnExecuteAsync((CancellationToken cts) =>
                     TestCommand.Run(results.Value() ?? TestCommand.DefaultResultsDirectory, cmd.RemainingArguments,
                         new ReportFiles(report.Value(), lcov.Value(), cobertura.Value(), markdown.Value(), html.Value()),
-                        GateOptions.Parse(failLines.Value(), failBranches.Value(), failMcDc.Value(), exclusions.Value()), exceptionExits.HasValue(), cts));
+                        GateOptions.Parse(failLines.Value(), failBranches.Value(), failMcDc.Value(), exclusions.Value(), strict.HasValue()), exceptionExits.HasValue(), cts));
             });
 
             app.Command("mcdc-report", cmd =>
@@ -73,11 +74,12 @@ internal class Program
                 var failLines = cmd.Option("--fail-under-lines <PERCENT>", "Fail when line coverage is below this", CommandOptionType.SingleValue);
                 var failBranches = cmd.Option("--fail-under-branches <PERCENT>", "Fail when branch coverage is below this", CommandOptionType.SingleValue);
                 var failMcDc = cmd.Option("--fail-under-mcdc <PERCENT>", "Fail when MC/DC (conditions shown) is below this", CommandOptionType.SingleValue);
-                var exclusions = cmd.Option("--exclusions <FILE>", "Files and lines the fail-under checks leave out (path glob, or path:line, one a line)", CommandOptionType.SingleValue);
+                var exclusions = cmd.Option("--exclusions <FILE>", "What the fail-under checks leave out, one a line: a path glob, path:line, or path:line condition", CommandOptionType.SingleValue);
+                var strict = cmd.Option("--strict-exclusions", "Fail when an exclusion leaves out no gap (so the list can only shrink)", CommandOptionType.NoValue);
 
                 cmd.OnExecute(() =>
                 {
-                    var gate = GateOptions.Parse(failLines.Value(), failBranches.Value(), failMcDc.Value(), exclusions.Value());
+                    var gate = GateOptions.Parse(failLines.Value(), failBranches.Value(), failMcDc.Value(), exclusions.Value(), strict.HasValue());
                     var modules = McDcReport.AnalyzeDirectory(directory.Value() ?? TestCommand.DefaultResultsDirectory, hits.Value());
                     new ReportFiles(report.Value(), lcov.Value(), cobertura.Value(), markdown.Value(), html.Value()).Write(modules);
                     return gate.Check(modules) ? 0 : 1;
