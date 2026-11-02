@@ -47,6 +47,8 @@ public class DecisionEntry
     public int? SwitchId { get; set; }
     public int? SwitchSection { get; set; }
     public List<string> Conditions { get; set; } = new();
+    // the innermost function it's in (FunctionEntry.Id; -1: none, e.g. a field initializer)
+    public int Function { get; set; } = -1;
 }
 
 public class SkippedDecision
@@ -79,6 +81,8 @@ public class ProbeEntry
     public int Line { get; set; }
     public int EndLine { get; set; }
     public string Kind { get; set; } = Statement;
+    // the innermost function it's in (FunctionEntry.Id; -1: none); a lambda's are its function's
+    public int Function { get; set; } = -1;
 }
 
 public class FunctionEntry
@@ -118,4 +122,6 @@ public class SwitchEntry
     // "no case matched" (-1: none, or it can't happen)
     public List<List<int>> LabelProbes { get; set; } = new();
     public int NoMatchProbe { get; set; } = -1;
+    // the innermost function it's in (FunctionEntry.Id; -1: none)
+    public int Function { get; set; } = -1;
 }

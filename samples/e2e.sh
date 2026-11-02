@@ -54,6 +54,7 @@ done
 grep -F 'lines-covered="10" lines-valid="10" branches-covered="9" branches-valid="10"' coverage/cobertura.xml
 grep -F '<package name="Shop.Core"' coverage/cobertura.xml
 grep -F '<class name="Shop.Core.Orders" filename="Orders.cs"' coverage/cobertura.xml
+grep -F '<method name="CanShip" signature="(bool, bool, bool)" line-rate="1" branch-rate="1"' coverage/cobertura.xml
 grep -E '<line number="12" hits="3" branch="true" condition-coverage="[0-9]+% \([0-9]+/[0-9]+\)" */>' coverage/cobertura.xml
 # Markdown and HTML: the summary, and MC/DC as tables
 grep -F '| MC/DC | 5 | 11 | 45.5% |' report.md

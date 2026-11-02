@@ -10,6 +10,9 @@ public class FunctionCoverage
     public int ExitsTaken { get; init; }
     // the exits that were never taken: "line 12", or "an exception" (the exception exits option)
     public List<string> ExitsNotTaken { get; init; } = new();
+    // its lines (not those of local functions in it), and those of them that ran
+    public HashSet<int> Lines { get; init; } = new();
+    public HashSet<int> LinesRun { get; init; } = new();
 }
 
 public class SwitchCoverage
@@ -71,11 +74,19 @@ public class FileCoverage
             }
         }
 
+        var functionLines = map.Probes
+            .Where(p => p.Function >= 0 && p.Kind is ProbeEntry.Statement or ProbeEntry.EmptyBlock)
+            .GroupBy(p => p.Function)
+            .ToDictionary(g => g.Key, g => g.SelectMany(p => Enumerable.Range(p.Line, p.EndLine - p.Line + 1)).ToHashSet());
         foreach (var function in map.Functions)
         {
             var exits = function.Exits.Select(id => map.Probes[id]).ToList();
-            For(function.File).Functions.Add(new FunctionCoverage
+            var file = For(function.File);
+            var lines = functionLines.TryGetValue(function.Id, out var l) ? l : new HashSet<int>();
+            file.Functions.Add(new FunctionCoverage
             {
+                Lines = lines,
+                LinesRun = lines.Where(file.LinesRun.Contains).ToHashSet(),
                 Function = function,
                 Entered = function.Entry >= 0 && ran.Contains(function.Entry),
                 ExitsTaken = exits.Count(p => ran.Contains(p.Id)),

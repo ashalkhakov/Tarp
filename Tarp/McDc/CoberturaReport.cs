@@ -10,10 +10,10 @@ namespace Tarp.McDc;
 /*
  * A Cobertura XML report (coverage-04.dtd, as coverlet writes it): Azure DevOps'
  * PublishCodeCoverageResults, GitLab, Jenkins, Codecov and ReportGenerator read it. One package per
- * module, one class per source file; per line how many times it ran and, where it has decisions or
- * branch points, its branches taken ("condition-coverage", counted as in the lcov tracefile).
- * Cobertura has no MC/DC: the other reports have it. Methods are left out (the map has no function
- * ends to give them their lines).
+ * module, one class per source file, and in it one method per function (its own lines: a local
+ * function's are its own method's, a lambda's its function's); per line how many times it ran and,
+ * where it has decisions or branch points, its branches taken ("condition-coverage", counted as in the
+ * lcov tracefile). Cobertura has no MC/DC: the other reports have it.
  */
 public static class CoberturaReport
 {
@@ -35,19 +35,18 @@ public static class CoberturaReport
             int moduleLines = 0, moduleRun = 0, moduleBranches = 0, moduleTaken = 0;
             foreach (var (_, file, path) in files.Where(f => f.Module == module).OrderBy(f => f.File.File, StringComparer.Ordinal))
             {
-                var perLine = Branches(module, file);
-                var lineElements = new XElement("lines");
-                foreach (var line in file.Lines.Union(perLine.Keys).OrderBy(l => l))
+                var perLine = Branches(module, file, null);
+                var methods = new XElement("methods");
+                foreach (var f in file.Functions.OrderBy(f => f.Function.Line))
                 {
-                    var element = new XElement("line",
-                        new XAttribute("number", line),
-                        new XAttribute("hits", file.LineCounts.TryGetValue(line, out var c) ? c : 0),
-                        new XAttribute("branch", perLine.ContainsKey(line) ? "true" : "false"));
-                    if (perLine.TryGetValue(line, out var b))
-                    {
-                        element.Add(new XAttribute("condition-coverage", Invariant($"{Percent(b.Taken, b.Total)}% ({b.Taken}/{b.Total})")));
-                    }
-                    lineElements.Add(element);
+                    var own = Branches(module, file, f.Function.Id);
+                    var (name, signature) = NameAndSignature(f.Function.Name);
+                    methods.Add(new XElement("method",
+                        new XAttribute("name", name),
+                        new XAttribute("signature", signature),
+                        Rates(f.LinesRun.Count, f.Lines.Count, own.Values.Sum(b => b.Taken), own.Values.Sum(b => b.Total)),
+                        new XAttribute("complexity", 0),
+                        Lines(file, f.Lines, own)));
                 }
                 var fileBranches = perLine.Values.Sum(b => b.Total);
                 var fileTaken = perLine.Values.Sum(b => b.Taken);
@@ -56,8 +55,8 @@ public static class CoberturaReport
                     new XAttribute("filename", Relative(root, path)),
                     Rates(file.LinesRun.Count, file.Lines.Count, fileTaken, fileBranches),
                     new XAttribute("complexity", 0),
-                    new XElement("methods"),
-                    lineElements));
+                    methods,
+                    Lines(file, file.Lines, perLine)));
                 moduleLines += file.Lines.Count;
                 moduleRun += file.LinesRun.Count;
                 moduleBranches += fileBranches;
@@ -91,19 +90,38 @@ public static class CoberturaReport
         return document.Declaration + "\n" + document.ToString() + "\n";
     }
 
-    // per line: its branches (decision outcomes, and branch points' ways), and how many were taken
-    private static Dictionary<int, (int Taken, int Total)> Branches(ModuleResult module, FileCoverage file)
+    private static XElement Lines(FileCoverage file, IEnumerable<int> lines, Dictionary<int, (int Taken, int Total)> perLine)
+    {
+        var element = new XElement("lines");
+        foreach (var line in lines.Union(perLine.Keys).OrderBy(l => l))
+        {
+            var e = new XElement("line",
+                new XAttribute("number", line),
+                new XAttribute("hits", file.LineCounts.TryGetValue(line, out var c) ? c : 0),
+                new XAttribute("branch", perLine.ContainsKey(line) ? "true" : "false"));
+            if (perLine.TryGetValue(line, out var b))
+            {
+                e.Add(new XAttribute("condition-coverage", Invariant($"{Percent(b.Taken, b.Total)}% ({b.Taken}/{b.Total})")));
+            }
+            element.Add(e);
+        }
+        return element;
+    }
+
+    // per line: its branches (decision outcomes, and branch points' ways), and how many were taken; the
+    // whole file's, or a function's own
+    private static Dictionary<int, (int Taken, int Total)> Branches(ModuleResult module, FileCoverage file, int? function)
     {
         long Count(int probe) => module.Counts.TryGetValue(probe, out var c) ? c : 0;
         var perLine = new Dictionary<int, (int Taken, int Total)>();
         void Add(int line, int taken, int total) =>
             perLine[line] = perLine.TryGetValue(line, out var b) ? (b.Taken + taken, b.Total + total) : (taken, total);
 
-        foreach (var d in file.Decisions)
+        foreach (var d in file.Decisions.Where(d => function == null || d.Decision.Function == function))
         {
             Add(d.Decision.Line, (d.OutcomeTrue ? 1 : 0) + (d.OutcomeFalse ? 1 : 0), 2);
         }
-        foreach (var s in file.Switches)
+        foreach (var s in file.Switches.Where(s => function == null || s.Switch.Function == function))
         {
             var sections = s.Switch.Sections.Where(p => p >= 0).ToList();
             Add(s.Switch.Line, sections.Count(p => Count(p) > 0), sections.Count);
@@ -122,6 +140,28 @@ public static class CoberturaReport
 
     private static string Percent(int covered, int total) =>
         ((int)Math.Round(total == 0 ? 100.0 : 100.0 * covered / total)).ToString(CultureInfo.InvariantCulture);
+
+    // "Shop.Orders.CanShip(bool, bool)" -> ("CanShip", "(bool, bool)"): the type is the class's; dots in
+    // generic arguments (List<System.Int32>) and in the parameters aren't separators
+    private static (string Name, string Signature) NameAndSignature(string function)
+    {
+        var open = function.IndexOf('(', StringComparison.Ordinal);
+        var name = open < 0 ? function : function[..open];
+        var signature = open < 0 ? "" : function[open..];
+        var depth = 0;
+        for (var i = name.Length - 1; i >= 0; i--)
+        {
+            depth += name[i] == '>' ? 1 : name[i] == '<' ? -1 : 0;
+            if (depth == 0 && name[i] == '.' && i + 1 < name.Length && !IsAccessor(name[(i + 1)..]))
+            {
+                return (name[(i + 1)..], signature);
+            }
+        }
+        return (name, signature);
+    }
+
+    // P.get, P.set, E.add: the property's name stays with its accessor
+    private static bool IsAccessor(string part) => part is "get" or "set" or "init" or "add" or "remove";
 
     // Shop.Core/Orders.cs -> Shop.Core.Orders
     private static string ClassName(string file) =>

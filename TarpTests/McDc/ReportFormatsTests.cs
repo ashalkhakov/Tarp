@@ -98,6 +98,54 @@ public static class T
         lines[LineOf("switch (x)")].Attribute("condition-coverage")!.Value.Should().Be("50% (1/2)");
         lines[LineOf("return true;")].Attribute("branch")!.Value.Should().Be("false");
         lines[LineOf("public static int Never")].Attribute("hits")!.Value.Should().Be("0");
+
+        // a method per function, with its own lines and branches
+        var methods = c.Element("methods")!.Elements("method").ToDictionary(m => m.Attribute("name")!.Value);
+        methods.Keys.Should().Equal("Both", "Never", "Kind");
+        methods["Both"].Attribute("signature")!.Value.Should().Be("(bool, bool)");
+        methods["Both"].Attribute("line-rate")!.Value.Should().Be("1");
+        methods["Both"].Attribute("branch-rate")!.Value.Should().Be("1");
+        methods["Both"].Descendants("line").Select(l => l.Attribute("number")!.Value)
+            .Should().Equal(new[] { "if (a && b)", "return true;", "return false;" }.Select(t => LineOf(t).ToString(CultureInfo.InvariantCulture)));
+        methods["Never"].Attribute("line-rate")!.Value.Should().Be("0");
+        methods["Kind"].Attribute("branch-rate")!.Value.Should().Be("0.5");
+    }
+
+    // a local function's lines and decisions are its own; a lambda's are the function's around it
+    [TestMethod]
+    public void FunctionsOwnLines()
+    {
+        const string source = @"
+public static class T
+{
+    public static int Outer(int x)
+    {
+        System.Func<int, bool> small = y => y < 10 && y != 3;
+        int Twice(int y)
+        {
+            if (y > 0 && y < 100)
+                return y * 2;
+            return 0;
+        }
+        return small(x) ? Twice(x) : -1;
+    }
+}";
+        int LineIn(string text) => source.Split('\n').Select((l, i) => (l, i)).Single(x => x.l.Contains(text, StringComparison.Ordinal)).i + 1;
+
+        var p = McDcEndToEndTests.Build(source);
+        p.Check("Outer", 5);
+        var functions = FileCoverage.Of(new ModuleResult(p.Map, p.Results(), p.Counts())).Single().Functions
+            .ToDictionary(f => f.Function.Name);
+
+        functions["T.Outer(int)"].Lines.Should().BeEquivalentTo(new[] { LineIn("small = y"), LineIn("return small(x)") });
+        functions["Twice(int)"].Lines.Should().BeEquivalentTo(new[] { LineIn("if (y > 0"), LineIn("return y * 2"), LineIn("return 0") });
+        functions["Twice(int)"].LinesRun.Should().HaveCount(2);
+
+        var twice = p.Map.Functions.Single(f => f.Name == "Twice(int)").Id;
+        var outer = p.Map.Functions.Single(f => f.Name == "T.Outer(int)").Id;
+        p.Map.Decisions.Single(d => d.Text == "y > 0 && y < 100").Function.Should().Be(twice);
+        p.Map.Decisions.Single(d => d.Text == "y < 10 && y != 3").Function.Should().Be(outer);
+        p.Map.Decisions.Single(d => d.Text == "small(x)").Function.Should().Be(outer);
     }
 
     [TestMethod]

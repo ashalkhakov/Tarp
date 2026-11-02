@@ -42,6 +42,8 @@ public sealed class CoverageRewriter : DecisionRewriter
     // the function whose body is being visited; null in a lambda, whose returns aren't the function's exits
     private readonly Stack<FunctionEntry?> _functions = new();
     private readonly Stack<SwitchEntry> _switches = new();
+    // per function begun: how many probes, decisions and switches the map had then (see EndFunction)
+    private readonly Dictionary<FunctionEntry, (int Probes, int Decisions, int Switches)> _functionStarts = new();
     // the probe that runs first for an original statement (for a block: the first one in it)
     private readonly Dictionary<StatementSyntax, int> _firstProbe = new();
 
@@ -1022,6 +1024,7 @@ public sealed class CoverageRewriter : DecisionRewriter
         var function = new FunctionEntry { Id = Map.Functions.Count, File = DisplayPath, Line = Line(first), Name = "<top-level statements>" };
         Map.Functions.Add(function);
         _functions.Push(function);
+        _functionStarts[function] = (Map.Probes.Count, Map.Decisions.Count, Map.Switches.Count);
 
         var r = (CompilationUnitSyntax)base.VisitCompilationUnit(node)!;
         var members = new List<MemberDeclarationSyntax>();
@@ -1045,6 +1048,7 @@ public sealed class CoverageRewriter : DecisionRewriter
         }
 
         _functions.Pop();
+        EndFunction(function);
         return r.WithMembers(List(members));
     }
 
@@ -1066,7 +1070,28 @@ public sealed class CoverageRewriter : DecisionRewriter
         };
         Map.Functions.Add(function);
         _functions.Push(function);
+        _functionStarts[function] = (Map.Probes.Count, Map.Decisions.Count, Map.Switches.Count);
         return true;
+    }
+
+    // what was added to the map since the function began is in it, unless a function nested in it (a
+    // local function, which ends first) has it already; lambdas aren't functions, so theirs is the function's
+    private void EndFunction(FunctionEntry function)
+    {
+        var (probes, decisions, switches) = _functionStarts[function];
+        _functionStarts.Remove(function);
+        foreach (var p in Map.Probes.Skip(probes).Where(p => p.Function < 0))
+        {
+            p.Function = function.Id;
+        }
+        foreach (var d in Map.Decisions.Skip(decisions).Where(d => d.Function < 0))
+        {
+            d.Function = function.Id;
+        }
+        foreach (var s in Map.Switches.Skip(switches).Where(s => s.Function < 0))
+        {
+            s.Function = function.Id;
+        }
     }
 
     // the function's body, with its entry and exits; ends the function begun with BeginFunction
@@ -1075,9 +1100,12 @@ public sealed class CoverageRewriter : DecisionRewriter
         BlockSyntax? body, ArrowExpressionClauseSyntax? arrow, SyntaxToken semicolon, bool returnsValue, FunctionEntry function)
     {
         var block = ProbedBody(originalBody, originalArrow, body, arrow, semicolon, returnsValue, function);
-        return _exceptionExits && !IsIterator(originalBody)
-            ? WithExceptionExit((SyntaxNode?)originalBody ?? originalArrow!, block, function)
-            : block;
+        if (_exceptionExits && !IsIterator(originalBody))
+        {
+            block = WithExceptionExit((SyntaxNode?)originalBody ?? originalArrow!, block, function);
+        }
+        EndFunction(function);
+        return block;
     }
 
     // yield return can't be in a try block with a catch clause

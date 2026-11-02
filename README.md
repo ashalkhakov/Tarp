@@ -95,8 +95,9 @@ condition's sense is 1 when shown to affect the outcome), with full source paths
 lcov 2.6: `genhtml --branch-coverage --mcdc-coverage coverage.info -o html`.
 
 The Cobertura report has lines with hit counts and, per line, its branches taken (`condition-coverage`,
-counted as in the tracefile), with one package per assembly and one class per source file. Cobertura
-has no MC/DC and Tarp writes no methods.
+counted as in the tracefile), with one package per assembly, one class per source file, and a method
+per function with its own lines and branches (a local function's lines are its own, a lambda's belong
+to the function around it). Cobertura has no MC/DC.
 
 The Markdown and HTML reports give, per file, what wasn't covered, and MC/DC per decision as tables:
 the evaluations recorded (`T`, `F`, `-` for not evaluated), then per condition whether it was shown
