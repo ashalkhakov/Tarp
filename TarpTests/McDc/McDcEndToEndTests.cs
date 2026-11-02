@@ -66,13 +66,13 @@ public class McDcEndToEndTests
         .Select(p => MetadataReference.CreateFromFile(p))
         .ToArray();
 
-    internal static Program Build(string source, OutputKind kind = OutputKind.DynamicallyLinkedLibrary)
+    internal static Program Build(string source, OutputKind kind = OutputKind.DynamicallyLinkedLibrary, bool exceptionExits = false)
     {
         var tree = CSharpSyntaxTree.ParseText(source, path: "T.cs");
         var compilation = Compile("Original", kind, tree);
 
         var map = new McDcMap { ModuleId = "test" };
-        var rewriter = new CoverageRewriter(compilation.GetSemanticModel(tree), map, "T.cs");
+        var rewriter = new CoverageRewriter(compilation.GetSemanticModel(tree), map, "T.cs", exceptionExits: exceptionExits);
         var root = McDcProjectInstrumenter.WithPrologue((CompilationUnitSyntax)rewriter.Visit(tree.GetRoot())!, "T.cs");
         var instrumentedSource = root.ToFullString();
 

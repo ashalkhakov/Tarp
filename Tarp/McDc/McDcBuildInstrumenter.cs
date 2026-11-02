@@ -32,6 +32,8 @@ public class McDcBuildRequest
     public string LangVersion { get; set; } = "";
     public string Nullable { get; set; } = "";
     public bool AllowUnsafe { get; set; }
+    // count functions left by an exception (TarpExceptionExits)
+    public bool ExceptionExits { get; set; }
     public List<string> Defines { get; } = new();
     public List<string> References { get; } = new();
     public List<string> Analyzers { get; } = new();
@@ -63,6 +65,7 @@ public class McDcBuildRequest
                 case "lang-version": r.LangVersion = value; break;
                 case "nullable": r.Nullable = value; break;
                 case "allow-unsafe": r.AllowUnsafe = string.Equals(value, "true", StringComparison.OrdinalIgnoreCase); break;
+                case "exception-exits": r.ExceptionExits = string.Equals(value, "true", StringComparison.OrdinalIgnoreCase); break;
                 case "define": if (value.Length > 0) r.Defines.Add(value); break;
                 case "reference": r.References.Add(value); break;
                 case "analyzer": r.Analyzers.Add(value); break;
@@ -219,7 +222,8 @@ public class McDcBuildInstrumenter
         foreach (var (tree, _) in toInstrument)
         {
             var first = map.Decisions.Count;
-            var rewriter = new CoverageRewriter(compilation.GetSemanticModel(tree), map, DisplayPath(request, tree.FilePath), excluded[tree.FilePath]);
+            var rewriter = new CoverageRewriter(compilation.GetSemanticModel(tree), map, DisplayPath(request, tree.FilePath), excluded[tree.FilePath],
+                request.ExceptionExits);
             var root = (CompilationUnitSyntax)rewriter.Visit(tree.GetRoot())!;
             var text = McDcProjectInstrumenter.WithPrologue(root, tree.FilePath).ToFullString();
 

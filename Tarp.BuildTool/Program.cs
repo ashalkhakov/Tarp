@@ -42,9 +42,10 @@ internal class Program
 
                 var results = cmd.Option("--tarp-results <DIR>", $"Where maps and hits go (default: {TestCommand.DefaultResultsDirectory})", CommandOptionType.SingleValue);
                 var report = cmd.Option("--tarp-report <FILE>", "Write the report to a file instead of the console", CommandOptionType.SingleValue);
+                var exceptionExits = cmd.Option("--tarp-exception-exits", "Also count functions left by an exception (wraps each function body in an exception filter)", CommandOptionType.NoValue);
 
                 cmd.OnExecuteAsync((CancellationToken cts) =>
-                    TestCommand.Run(results.Value() ?? TestCommand.DefaultResultsDirectory, cmd.RemainingArguments, report.Value(), cts));
+                    TestCommand.Run(results.Value() ?? TestCommand.DefaultResultsDirectory, cmd.RemainingArguments, report.Value(), exceptionExits.HasValue(), cts));
             });
 
             app.Command("mcdc-report", cmd =>

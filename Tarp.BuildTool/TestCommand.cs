@@ -11,7 +11,7 @@ internal static class TestCommand
 {
     public const string DefaultResultsDirectory = "TestResults/tarp";
 
-    public static async Task<int> Run(string resultsDirectory, IReadOnlyList<string> testArguments, string? reportFile, CancellationToken cts)
+    public static async Task<int> Run(string resultsDirectory, IReadOnlyList<string> testArguments, string? reportFile, bool exceptionExits, CancellationToken cts)
     {
         var results = Path.GetFullPath(resultsDirectory);
         Directory.CreateDirectory(results);
@@ -32,6 +32,10 @@ internal static class TestCommand
         start.ArgumentList.Add("-p:Tarp=true");
         start.ArgumentList.Add($"-p:CustomAfterMicrosoftCommonTargets={targets}");
         start.ArgumentList.Add($"-p:TarpResultsDirectory={results}{Path.DirectorySeparatorChar}");
+        if (exceptionExits)
+        {
+            start.ArgumentList.Add("-p:TarpExceptionExits=true");
+        }
         start.Environment["TARP_HITS_DIR"] = results;
 
         using var process = Process.Start(start) ?? throw new InvalidOperationException("could not start dotnet test");

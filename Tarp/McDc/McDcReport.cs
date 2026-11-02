@@ -192,7 +192,7 @@ public static class McDcReport
             }
             else if (f.ExitsNotTaken.Count > 0)
             {
-                sb.AppendLine(CultureInfo.InvariantCulture, $"  {f.Function.Name}: exits not taken at line {string.Join(", ", f.ExitsNotTaken)}");
+                sb.AppendLine(CultureInfo.InvariantCulture, $"  {f.Function.Name}: exits not taken: {string.Join(", ", f.ExitsNotTaken)}");
             }
         }
 

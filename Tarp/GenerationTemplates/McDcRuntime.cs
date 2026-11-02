@@ -72,6 +72,14 @@ namespace TarpGen
             return value;
         }
 
+        // in an exception filter around a function's body (catch ... when (Escaped(id))): records that an
+        // exception left the function, and returns false, so that nothing is caught
+        public static bool Escaped(int id)
+        {
+            Hit(id);
+            return false;
+        }
+
         // a?.b: one probe for "not null", one for "null"
         public static T PNN<T>(int notNull, int isNull, T value)
         {

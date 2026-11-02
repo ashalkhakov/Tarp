@@ -13,7 +13,11 @@ From one run of your tests, in source terms (what you wrote, not the compiled IL
   initializers: a line belongs to the innermost probe around it, so a lambda or an arm that never ran
   shows as not run even when the statement around it did.
 - **Functions**: entered or not, and which exits were taken: `return` and `throw` statements, and the
-  end of the body when it can be reached. Methods, constructors, accessors, operators, local
+  end of the body when it can be reached. With `--tarp-exception-exits` (or the MSBuild property
+  `TarpExceptionExits=true`), also whether an exception left the function: each body gets an exception
+  filter that records it and catches nothing, so exceptions and their stack traces are as they were.
+  It's opt-in because a method with a handler is often not inlined, which can slow hot code down, and
+  a debugger may stop differently; iterators aren't wrapped (`yield return` can't be in such a try). Methods, constructors, accessors, operators, local
   functions and top-level statements count; lambdas don't (their statements are still lines).
 - **Branches**: both outcomes of every decision (including `when` guards and `catch` filters), every
   `switch` section (including "no case matched" for a switch without a `default`, when some value can
@@ -65,7 +69,7 @@ For each C# project that isn't a test project, right before it compiles:
    `dotnet tarp mcdc-report` prints it again from `TestResults/tarp`.
 
 Options: `--tarp-results <dir>` (instead of `TestResults/tarp`), `--tarp-report <file>` (instead of the
-console). In a project: `<TarpExclude>true</TarpExclude>` to leave it out; `[ExcludeFromCodeCoverage]`
+console), `--tarp-exception-exits` (count functions left by an exception, see above). In a project: `<TarpExclude>true</TarpExclude>` to leave it out; `[ExcludeFromCodeCoverage]`
 leaves out a member or type.
 
 ### A single project, without a build

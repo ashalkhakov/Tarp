@@ -67,6 +67,8 @@ public class ProbeEntry
     public const string NoCaseMatched = "no-case-matched";
     // a branch that isn't a line of its own, e.g. a side of ??
     public const string Branch = "branch";
+    // a function left by an exception (the exception exits option): an exit, not a line
+    public const string ExceptionExit = "exception-exit";
 
     public int Id { get; set; }
     public string File { get; set; } = "";
@@ -83,7 +85,8 @@ public class FunctionEntry
     public string Name { get; set; } = "";
     // the probe that runs first in the function
     public int Entry { get; set; } = -1;
-    // the probes of its exit points: return and throw statements, and the end of the body
+    // the probes of its exit points: return and throw statements, the end of the body, and (with the
+    // exception exits option) an exception leaving it
     public List<int> Exits { get; set; } = new();
 }
 

@@ -45,9 +45,14 @@ public sealed class CoverageRewriter : DecisionRewriter
     // the probe that runs first for an original statement (for a block: the first one in it)
     private readonly Dictionary<StatementSyntax, int> _firstProbe = new();
 
-    public CoverageRewriter(SemanticModel model, McDcMap map, string displayPath, IReadOnlyDictionary<int, string>? excluded = null)
+    // count functions left by an exception (an exception filter around each body: opt-in, see WithExceptionExit)
+    private readonly bool _exceptionExits;
+
+    public CoverageRewriter(SemanticModel model, McDcMap map, string displayPath, IReadOnlyDictionary<int, string>? excluded = null,
+        bool exceptionExits = false)
         : base(model, map, displayPath, excluded)
     {
+        _exceptionExits = exceptionExits;
     }
 
     // statements that aren't in a block: if (x) return; -> if (x) { P(id); return; }
@@ -880,6 +885,50 @@ public sealed class CoverageRewriter : DecisionRewriter
 
     // the function's body, with its entry and exits; ends the function begun with BeginFunction
     private BlockSyntax FunctionBody(
+        BlockSyntax? originalBody, ArrowExpressionClauseSyntax? originalArrow,
+        BlockSyntax? body, ArrowExpressionClauseSyntax? arrow, SyntaxToken semicolon, bool returnsValue, FunctionEntry function)
+    {
+        var block = ProbedBody(originalBody, originalArrow, body, arrow, semicolon, returnsValue, function);
+        return _exceptionExits && !IsIterator(originalBody)
+            ? WithExceptionExit((SyntaxNode?)originalBody ?? originalArrow!, block, function)
+            : block;
+    }
+
+    // yield return can't be in a try block with a catch clause
+    private static bool IsIterator(BlockSyntax? body) =>
+        body != null && body.DescendantNodes(n => n is not (AnonymousFunctionExpressionSyntax or LocalFunctionStatementSyntax))
+            .OfType<YieldStatementSyntax>().Any();
+
+    /*
+     * The exception exits option: an exception filter around the body records that an exception left the
+     * function, without catching it (the filter returns false):
+     *
+     *   { try { ... } catch (global::System.Exception) when (global::TarpGen.McDc.Escaped(7)) { throw; } }
+     *
+     * The filter runs while the runtime looks for a handler, before the stack unwinds, so the exception
+     * and its stack trace are as they were; exceptions the body catches itself never reach it. "throw;"
+     * never runs: it keeps the compiler's view of the body (no end reached through the catch, out
+     * parameters still assigned). Opt-in: a method with a handler is often not inlined by the JIT, and a
+     * debugger may stop differently. All on the body's first and last lines.
+     */
+    private BlockSyntax WithExceptionExit(SyntaxNode original, BlockSyntax body, FunctionEntry function)
+    {
+        var id = NewProbe(original, original.GetFirstToken().Span, ProbeEntry.ExceptionExit);
+        function.Exits.Add(id);
+
+        var guarded = (TryStatementSyntax)ParseStatement($"try {{ }} catch (global::System.Exception) when ({Runtime}.Escaped({id})) {{ throw; }}");
+        var inner = Block(body.Statements)
+            .WithOpenBraceToken(Token(SyntaxKind.OpenBraceToken).WithLeadingTrivia(Space).WithTrailingTrivia(body.OpenBraceToken.TrailingTrivia))
+            .WithCloseBraceToken(Token(SyntaxKind.CloseBraceToken).WithLeadingTrivia(body.CloseBraceToken.LeadingTrivia).WithTrailingTrivia(Space));
+        var statement = guarded.WithTryKeyword(guarded.TryKeyword.WithLeadingTrivia(Space).WithTrailingTrivia()).WithBlock(inner).WithTrailingTrivia(Space);
+
+        return body
+            .WithOpenBraceToken(body.OpenBraceToken.WithTrailingTrivia())
+            .WithStatements(SingletonList<StatementSyntax>(statement))
+            .WithCloseBraceToken(body.CloseBraceToken.WithLeadingTrivia());
+    }
+
+    private BlockSyntax ProbedBody(
         BlockSyntax? originalBody, ArrowExpressionClauseSyntax? originalArrow,
         BlockSyntax? body, ArrowExpressionClauseSyntax? arrow, SyntaxToken semicolon, bool returnsValue, FunctionEntry function)
     {

@@ -8,8 +8,8 @@ public class FunctionCoverage
     public FunctionEntry Function { get; init; } = new();
     public bool Entered { get; init; }
     public int ExitsTaken { get; init; }
-    // lines of the exits that were never taken
-    public List<int> ExitsNotTaken { get; init; } = new();
+    // the exits that were never taken: "line 12", or "an exception" (the exception exits option)
+    public List<string> ExitsNotTaken { get; init; } = new();
 }
 
 public class SwitchCoverage
@@ -79,7 +79,9 @@ public class FileCoverage
                 Function = function,
                 Entered = function.Entry >= 0 && ran.Contains(function.Entry),
                 ExitsTaken = exits.Count(p => ran.Contains(p.Id)),
-                ExitsNotTaken = exits.Where(p => !ran.Contains(p.Id)).Select(p => p.Line).ToList()
+                ExitsNotTaken = exits.Where(p => !ran.Contains(p.Id))
+                    .Select(p => p.Kind == ProbeEntry.ExceptionExit ? "an exception" : $"line {p.Line}")
+                    .ToList()
             });
         }
 
