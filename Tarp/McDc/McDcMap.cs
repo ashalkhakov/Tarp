@@ -10,6 +10,8 @@ public class McDcMap
     public const string FileSuffix = ".map.json";
 
     public string ModuleId { get; set; } = "";
+    // the assembly (the Cobertura report's package); empty in older maps
+    public string Name { get; set; } = "";
     public List<DecisionEntry> Decisions { get; set; } = new();
     public List<SkippedDecision> Skipped { get; set; } = new();
     // line, function and switch coverage (see CoverageRewriter)

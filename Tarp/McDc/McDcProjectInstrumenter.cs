@@ -50,7 +50,7 @@ public class McDcProjectInstrumenter
         var compilation = await project.GetCompilationAsync(cts).ConfigureAwait(false)
             ?? throw new InvalidOperationException($"could not compile {projectFilePath}");
 
-        var map = new McDcMap { ModuleId = Guid.NewGuid().ToString("N") };
+        var map = new McDcMap { ModuleId = Guid.NewGuid().ToString("N"), Name = project.AssemblyName };
         var baseDir = fileSystem.Path.GetDirectoryName(project.FilePath)!;
 
         foreach (var document in project.Documents)

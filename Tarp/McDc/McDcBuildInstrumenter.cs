@@ -204,6 +204,7 @@ public class McDcBuildInstrumenter
         }
 
         map.ModuleId = ModuleId(request, map);
+        map.Name = request.AssemblyName;
         WriteOutputs(request, map, rewritten, toInstrument);
 
         log.WriteLine($"Tarp: {request.AssemblyName}: {map.Decisions.Count} decisions instrumented, {map.Skipped.Count} skipped");

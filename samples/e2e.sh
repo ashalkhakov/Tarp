@@ -25,7 +25,7 @@ cd "$work/Shop"
 dotnet new tool-manifest
 dotnet tool install dotnet-tarp --add-source "$nupkg" --version "$version"
 
-dotnet tarp test --tarp-report report.txt --tarp-lcov coverage.info --tarp-markdown report.md --tarp-html report.html
+dotnet tarp test --tarp-report report.txt --tarp-lcov coverage.info --tarp-cobertura coverage/cobertura.xml --tarp-markdown report.md --tarp-html report.html
 cat report.txt
 
 # line, branch, function and condition coverage
@@ -50,6 +50,11 @@ grep -E '^SF:([A-Za-z]:)?[/\\].*Shop\.Core[/\\]Orders\.cs$' coverage.info
 for record in LF:10 LH:10 BRF:10 BRH:9 FNF:4 FNH:4 MCF:22 MCH:16 DA:12,3 "MCDC:12,3,f,0,0,paid"; do
     grep -Fx "$record" coverage.info
 done
+# Cobertura: lines and branches, file names relative to the sources' directory
+grep -F 'lines-covered="10" lines-valid="10" branches-covered="9" branches-valid="10"' coverage/cobertura.xml
+grep -F '<package name="Shop.Core"' coverage/cobertura.xml
+grep -F '<class name="Shop.Core.Orders" filename="Orders.cs"' coverage/cobertura.xml
+grep -E '<line number="12" hits="3" branch="true" condition-coverage="[0-9]+% \([0-9]+/[0-9]+\)" */>' coverage/cobertura.xml
 # Markdown and HTML: the summary, and MC/DC as tables
 grep -F '| MC/DC | 5 | 11 | 45.5% |' report.md
 grep -F '| c0 | `paid` | ✓ | ✗ | **not shown** | `c0=F c1=- c2=F` |' report.md

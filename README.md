@@ -82,21 +82,70 @@ or type.
 |---|---|---|
 | `--tarp-report <file>` | text (the console without it) | reading |
 | `--tarp-lcov <file>` | lcov tracefile (`coverage.info`) | genhtml, Codecov, Coveralls, editors' coverage gutters, other lcov tools |
+| `--tarp-cobertura <file>` | Cobertura XML | Azure DevOps' Code Coverage tab, GitLab merge requests, Jenkins, Codecov, ReportGenerator |
 | `--tarp-markdown <file>` | Markdown | a CI job summary (`$GITHUB_STEP_SUMMARY`) or a pull request comment |
 | `--tarp-html <file>` | one self-contained HTML page | browsing the source with counts, light and dark |
 
 Several can be given at once. `dotnet tarp mcdc-report -d TestResults/tarp` takes the same ones as
-`--report`, `--lcov`, `--markdown` and `--html`.
+`--report`, `--lcov`, `--cobertura`, `--markdown` and `--html`.
 
 The tracefile has lines with hit counts (`DA`), functions (`FN`, `FNDA`), branches (`BRDA`: each
 decision's true and false outcome, and the branch points above) and MC/DC (`MCDC`, lcov 2.x: a
 condition's sense is 1 when shown to affect the outcome), with full source paths. CI checks it with
 lcov 2.6: `genhtml --branch-coverage --mcdc-coverage coverage.info -o html`.
 
+The Cobertura report has lines with hit counts and, per line, its branches taken (`condition-coverage`,
+counted as in the tracefile), with one package per assembly and one class per source file. Cobertura
+has no MC/DC and Tarp writes no methods.
+
 The Markdown and HTML reports give, per file, what wasn't covered, and MC/DC per decision as tables:
 the evaluations recorded (`T`, `F`, `-` for not evaluated), then per condition whether it was shown
 true and false, and a test that would show what's missing. "no pair" is a condition of `^`, `==`,
 `!=` or `?:` shown both ways, but never in two evaluations with different outcomes.
+
+### In Azure DevOps
+
+`dotnet tarp test` takes `dotnet test`'s arguments, so the test results can be published as well:
+
+```yaml
+steps:
+- task: UseDotNet@2
+  inputs:
+    version: 10.0.x
+- script: dotnet tool install -g dotnet-tarp
+- script: >
+    dotnet tarp test --logger trx --results-directory $(Agent.TempDirectory)/tests
+    --tarp-cobertura $(Agent.TempDirectory)/coverage/cobertura.xml
+    --tarp-markdown $(Agent.TempDirectory)/coverage/coverage.md
+    --tarp-html $(Agent.TempDirectory)/coverage/index.html
+  displayName: Test with coverage
+- task: PublishTestResults@2
+  condition: succeededOrFailed()
+  inputs:
+    testResultsFormat: VSTest
+    testResultsFiles: $(Agent.TempDirectory)/tests/*.trx
+- task: PublishCodeCoverageResults@2
+  condition: succeededOrFailed()
+  inputs:
+    summaryFileLocation: $(Agent.TempDirectory)/coverage/cobertura.xml
+- script: echo "##vso[task.uploadsummary]$(Agent.TempDirectory)/coverage/coverage.md"
+  condition: succeededOrFailed()
+  displayName: Coverage and MC/DC summary
+- publish: $(Agent.TempDirectory)/coverage
+  artifact: coverage
+  condition: succeededOrFailed()
+```
+
+Tarp makes the reports' directories. On the pipeline run:
+
+- **Tests** tab: the test results, from the `.trx` files.
+- **Code Coverage** tab: lines and branches per folder and file, from the Cobertura report, down to
+  a file's source where the agent's paths let Azure find it. Azure DevOps has no MC/DC view.
+- **Extensions** tab: the Markdown report: the summary (MC/DC included), the files, and per file what
+  wasn't covered, with each incomplete decision's MC/DC tables (the evaluations, then per condition
+  what's missing and a test that would show it). Azure renders it with its own Markdown, not the wiki's.
+- **Artifacts** (`coverage`): the HTML report, `index.html`; download it and open it for the source
+  with counts and every decision's MC/DC tables.
 
 ### A single project, without a build
 

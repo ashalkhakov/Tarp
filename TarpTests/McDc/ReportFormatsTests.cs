@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Xml.Linq;
 using FluentAssertions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Tarp.McDc;
@@ -71,6 +73,31 @@ public static class T
         Array.IndexOf(lines, "BRF:4").Should().BeGreaterThan(Array.FindLastIndex(lines, l => l.StartsWith("BRDA:", StringComparison.Ordinal)));
         Array.IndexOf(lines, "LH:" + lines.Count(l => l.StartsWith("DA:", StringComparison.Ordinal) && !l.EndsWith(",0", StringComparison.Ordinal)))
             .Should().BeGreaterThan(0);
+    }
+
+    [TestMethod]
+    public void Cobertura()
+    {
+        var xml = XDocument.Parse(CoberturaReport.Format(Run(), DateTimeOffset.FromUnixTimeSeconds(1700000000)));
+        var coverage = xml.Root!;
+
+        xml.DocumentType!.SystemId.Should().Be("http://cobertura.sourceforge.net/xml/coverage-04.dtd");
+        coverage.Attribute("timestamp")!.Value.Should().Be("1700000000");
+        coverage.Attribute("lines-valid")!.Value.Should().Be("7");
+        coverage.Attribute("lines-covered")!.Value.Should().Be("5");
+        coverage.Attribute("branches-valid")!.Value.Should().Be("4");
+        coverage.Attribute("branches-covered")!.Value.Should().Be("3");
+        coverage.Attribute("line-rate")!.Value.Should().Be("0.7143");
+
+        var c = coverage.Descendants("class").Single();
+        c.Attribute("name")!.Value.Should().Be("T");
+        c.Attribute("filename")!.Value.Should().Be("T.cs");
+        var lines = c.Element("lines")!.Elements("line").ToDictionary(l => int.Parse(l.Attribute("number")!.Value, CultureInfo.InvariantCulture));
+        lines[LineOf("if (a && b)")].Attribute("hits")!.Value.Should().Be("3");
+        lines[LineOf("if (a && b)")].Attribute("condition-coverage")!.Value.Should().Be("100% (2/2)");
+        lines[LineOf("switch (x)")].Attribute("condition-coverage")!.Value.Should().Be("50% (1/2)");
+        lines[LineOf("return true;")].Attribute("branch")!.Value.Should().Be("false");
+        lines[LineOf("public static int Never")].Attribute("hits")!.Value.Should().Be("0");
     }
 
     [TestMethod]

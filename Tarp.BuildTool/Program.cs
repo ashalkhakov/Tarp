@@ -43,13 +43,14 @@ internal class Program
                 var results = cmd.Option("--tarp-results <DIR>", $"Where maps and hits go (default: {TestCommand.DefaultResultsDirectory})", CommandOptionType.SingleValue);
                 var report = cmd.Option("--tarp-report <FILE>", "Write the text report to a file instead of the console", CommandOptionType.SingleValue);
                 var lcov = cmd.Option("--tarp-lcov <FILE>", "Also write an lcov tracefile (lines, functions, branches, MC/DC)", CommandOptionType.SingleValue);
+                var cobertura = cmd.Option("--tarp-cobertura <FILE>", "Also write a Cobertura XML report (lines, branches)", CommandOptionType.SingleValue);
                 var markdown = cmd.Option("--tarp-markdown <FILE>", "Also write the report in Markdown", CommandOptionType.SingleValue);
                 var html = cmd.Option("--tarp-html <FILE>", "Also write the report as an HTML page, with the source", CommandOptionType.SingleValue);
                 var exceptionExits = cmd.Option("--tarp-exception-exits", "Also count functions left by an exception (wraps each function body in an exception filter)", CommandOptionType.NoValue);
 
                 cmd.OnExecuteAsync((CancellationToken cts) =>
                     TestCommand.Run(results.Value() ?? TestCommand.DefaultResultsDirectory, cmd.RemainingArguments,
-                        new ReportFiles(report.Value(), lcov.Value(), markdown.Value(), html.Value()), exceptionExits.HasValue(), cts));
+                        new ReportFiles(report.Value(), lcov.Value(), cobertura.Value(), markdown.Value(), html.Value()), exceptionExits.HasValue(), cts));
             });
 
             app.Command("mcdc-report", cmd =>
@@ -61,11 +62,12 @@ internal class Program
                 var hits = cmd.Option("--hits <HITS>", "The directory with the hits (default: <DIR>, searched recursively)", CommandOptionType.SingleValue);
                 var report = cmd.Option("-r|--report <FILE>", "Write the text report to a file instead of the console", CommandOptionType.SingleValue);
                 var lcov = cmd.Option("--lcov <FILE>", "Also write an lcov tracefile (lines, functions, branches, MC/DC)", CommandOptionType.SingleValue);
+                var cobertura = cmd.Option("--cobertura <FILE>", "Also write a Cobertura XML report (lines, branches)", CommandOptionType.SingleValue);
                 var markdown = cmd.Option("--markdown <FILE>", "Also write the report in Markdown", CommandOptionType.SingleValue);
                 var html = cmd.Option("--html <FILE>", "Also write the report as an HTML page, with the source", CommandOptionType.SingleValue);
 
                 cmd.OnExecute(() =>
-                    new ReportFiles(report.Value(), lcov.Value(), markdown.Value(), html.Value())
+                    new ReportFiles(report.Value(), lcov.Value(), cobertura.Value(), markdown.Value(), html.Value())
                         .Write(McDcReport.AnalyzeDirectory(directory.Value() ?? TestCommand.DefaultResultsDirectory, hits.Value())));
             });
 
