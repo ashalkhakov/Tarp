@@ -10,9 +10,9 @@ namespace Tarp.McDc
     /*
      * see: https://conservancy.umn.edu/bitstream/handle/11299/217382/monitorAlgorithm_0.pdf?sequence=1
      */
-    public class McDcFunctions
+    public static class McDcFunctions
     {
-        public int MarkAst(McDcNode node, int pos)
+        public static int MarkAst(McDcNode node, int pos)
         {
             Debug.Assert(node != null);
 
@@ -177,7 +177,7 @@ namespace Tarp.McDc
             }
         }
 
-        private void GenMarkers(McDcNode node, PathElem? path, List<MarkerFunction> functions)
+        private static void GenMarkers(McDcNode node, PathElem? path, List<MarkerFunction> functions)
         {
             Debug.Assert(node != null);
 
@@ -206,7 +206,7 @@ namespace Tarp.McDc
             }
         }
 
-        public IReadOnlyList<MarkerFunction> CreateMarkers(McDcNode node)
+        public static IReadOnlyList<MarkerFunction> CreateMarkers(McDcNode node)
         {
             var numPositions = MarkAst(node, 0);
 

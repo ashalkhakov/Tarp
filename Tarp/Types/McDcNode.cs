@@ -29,7 +29,8 @@ namespace Tarp.Types
     public class McDcNode
     {
         public McDcNodeKind Kind { get; set; }
-        public CSharpSyntaxNode SyntaxNode { get; set; }
+        // always set by whoever creates the node
+        public CSharpSyntaxNode SyntaxNode { get; set; } = null!;
         public List<McDcNode>? Children { get; set; }
 
         // only if Kind=Condition

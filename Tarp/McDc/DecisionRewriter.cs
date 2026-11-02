@@ -1,6 +1,7 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Operations;
 using System.Collections.Generic;
 using System.Linq;
 using Tarp.Types;
@@ -40,7 +41,7 @@ namespace Tarp.McDc;
  * Decisions we can't instrument without changing the program's meaning (or making it not compile) are
  * left alone and listed in the map as skipped, with the reason.
  */
-public sealed class DecisionRewriter : CSharpSyntaxRewriter
+public class DecisionRewriter : CSharpSyntaxRewriter
 {
     // the runtime's bit vectors and McDcFunctions' masks (2 bits per condition in an int)
     public const int MaxConditions = 16;
@@ -50,6 +51,10 @@ public sealed class DecisionRewriter : CSharpSyntaxRewriter
     private readonly SemanticModel _model;
     private readonly McDcMap _map;
     private readonly string _displayPath;
+
+    protected SemanticModel Model => _model;
+    protected McDcMap Map => _map;
+    protected string DisplayPath => _displayPath;
     // decisions not to instrument, by the start of their span, with the reason
     private readonly IReadOnlyDictionary<int, string> _excluded;
 
@@ -73,10 +78,10 @@ public sealed class DecisionRewriter : CSharpSyntaxRewriter
 
     private readonly Dictionary<SyntaxNode, bool> _excludedMembers = new();
 
-    // [ExcludeFromCodeCoverage] on the member, accessor, local function or type the decision is in
-    private bool IsExcludedFromCoverage(ExpressionSyntax e)
+    // [ExcludeFromCodeCoverage] on the member, accessor, local function or type the node is in (or is)
+    protected bool IsExcludedFromCoverage(SyntaxNode e)
     {
-        foreach (var a in e.Ancestors())
+        foreach (var a in e.AncestorsAndSelf())
         {
             if (a is not (MemberDeclarationSyntax or AccessorDeclarationSyntax or LocalFunctionStatementSyntax))
             {
@@ -97,12 +102,46 @@ public sealed class DecisionRewriter : CSharpSyntaxRewriter
         return false;
     }
 
-    private static bool IsDecisionRoot(ExpressionSyntax e)
+    /*
+     * What's an operator of a decision (DO-178C: any operator whose operands and result are bools), and
+     * what's a condition: && || !, and on bools & | ^ == != and ?:. An "is" with and/or/not patterns
+     * is an operator too: its primitive patterns are conditions (see RewritePattern).
+     */
+    private enum Operator { None, Parentheses, Logical, Not, BoolBinary, BoolConditional, Patterns }
+
+    private Operator OperatorOf(ExpressionSyntax e) => e switch
     {
-        if (DecisionTree.IsStructural(e) && DecisionTree.ContainsLogical(e))
+        ParenthesizedExpressionSyntax => Operator.Parentheses,
+        BinaryExpressionSyntax b when DecisionTree.IsLogical(b) => Operator.Logical,
+        PrefixUnaryExpressionSyntax u when u.IsKind(SyntaxKind.LogicalNotExpression) => Operator.Not,
+        // with a constant side (x == true, a ? b : false), a condition (or a decision on c) as before
+        BinaryExpressionSyntax b when DecisionTree.IsBoolOperatorKind(b.Kind()) && IsBool(b.Left) && IsBool(b.Right) &&
+                                      !IsConstant(b.Left) && !IsConstant(b.Right) => Operator.BoolBinary,
+        ConditionalExpressionSyntax c when IsBool(c.WhenTrue) && IsBool(c.WhenFalse) &&
+                                           !IsConstant(c.WhenTrue) && !IsConstant(c.WhenFalse) => Operator.BoolConditional,
+        IsPatternExpressionSyntax p when CanDecompose(p) => Operator.Patterns,
+        _ => Operator.None
+    };
+
+    private bool IsBool(ExpressionSyntax e) => _model.GetTypeInfo(e).Type?.SpecialType == SpecialType.System_Boolean;
+
+    private bool IsConstant(ExpressionSyntax e) => _model.GetConstantValue(e).HasValue;
+
+    // an operator other than parentheses and ! in the tree
+    private bool HasOperator(ExpressionSyntax e) => OperatorOf(e) switch
+    {
+        Operator.None => false,
+        Operator.Parentheses => HasOperator(((ParenthesizedExpressionSyntax)e).Expression),
+        Operator.Not => HasOperator(((PrefixUnaryExpressionSyntax)e).Operand),
+        _ => true
+    };
+
+    private bool IsDecisionRoot(ExpressionSyntax e)
+    {
+        if (OperatorOf(e) != Operator.None && HasOperator(e))
         {
             // the topmost node of the tree; the inner ones are handled together with it
-            return !(e.Parent is ExpressionSyntax p && DecisionTree.IsStructural(p));
+            return !(e.Parent is ExpressionSyntax p && OperatorOf(p) != Operator.None);
         }
         return IsControllingExpression(e);
     }
@@ -114,13 +153,129 @@ public sealed class DecisionRewriter : CSharpSyntaxRewriter
         DoStatementSyntax s => s.Condition == e,
         ForStatementSyntax s => s.Condition == e,
         ConditionalExpressionSyntax c => c.Condition == e,
+        // case ... when c:, arm when c =>, catch (...) when (c)
+        WhenClauseSyntax w => w.Condition == e,
+        CatchFilterClauseSyntax f => f.FilterExpression == e,
         _ => false
     };
 
+    // a condition: an expression, or a primitive pattern of an "is" (Text says what it tests)
+    private sealed record Condition(SyntaxNode Node, string Text);
+
+    // the decision's shape (c0, c1, ... for its conditions, see DecisionEntry.Shape) and its conditions, left to right
+    private string Structure(ExpressionSyntax e, List<Condition> conditions)
+    {
+        switch (OperatorOf(e))
+        {
+            case Operator.Parentheses:
+                return Structure(((ParenthesizedExpressionSyntax)e).Expression, conditions);
+            case Operator.Logical or Operator.BoolBinary:
+                {
+                    var b = (BinaryExpressionSyntax)e;
+                    var l = Structure(b.Left, conditions);
+                    var r = Structure(b.Right, conditions);
+                    return $"({l}) {b.OperatorToken.Text} ({r})";
+                }
+            case Operator.Not:
+                return $"!({Structure(((PrefixUnaryExpressionSyntax)e).Operand, conditions)})";
+            case Operator.BoolConditional:
+                {
+                    var c = (ConditionalExpressionSyntax)e;
+                    var condition = Structure(c.Condition, conditions);
+                    var whenTrue = Structure(c.WhenTrue, conditions);
+                    var whenFalse = Structure(c.WhenFalse, conditions);
+                    return $"({condition}) ? ({whenTrue}) : ({whenFalse})";
+                }
+            case Operator.Patterns:
+                {
+                    var p = (IsPatternExpressionSyntax)e;
+                    return PatternStructure(p.Pattern, p.Expression.ToString(), conditions);
+                }
+            default:
+                conditions.Add(new Condition(e, e.ToString()));
+                return "c" + (conditions.Count - 1);
+        }
+    }
+
+    private static string PatternStructure(PatternSyntax pattern, string input, List<Condition> conditions)
+    {
+        switch (pattern)
+        {
+            case ParenthesizedPatternSyntax p:
+                return PatternStructure(p.Pattern, input, conditions);
+            case BinaryPatternSyntax b:
+                {
+                    var l = PatternStructure(b.Left, input, conditions);
+                    var r = PatternStructure(b.Right, input, conditions);
+                    return $"({l}) {(b.IsKind(SyntaxKind.AndPattern) ? "&&" : "||")} ({r})";
+                }
+            case UnaryPatternSyntax u when u.IsKind(SyntaxKind.NotPattern) && HasCombinator(u.Pattern):
+                return $"!({PatternStructure(u.Pattern, input, conditions)})";
+            default:
+                conditions.Add(new Condition(pattern, $"{input} is {pattern}"));
+                return "c" + (conditions.Count - 1);
+        }
+    }
+
+    // and/or at the top of a pattern (under parentheses and not)
+    private static bool HasCombinator(PatternSyntax pattern) => pattern switch
+    {
+        ParenthesizedPatternSyntax p => HasCombinator(p.Pattern),
+        UnaryPatternSyntax u => HasCombinator(u.Pattern),
+        BinaryPatternSyntax => true,
+        _ => false
+    };
+
+    /*
+     * x is P1 and P2 or ...: decomposed when it has and/or at its top, and every "and" whose left side
+     * narrows the type (x is string and { Length: > 0 }) narrows to a type that can be written out
+     */
+    private bool CanDecompose(IsPatternExpressionSyntax p)
+    {
+        if (!HasCombinator(p.Pattern) || _model.GetTypeInfo(p.Expression).Type is not { IsRefLikeType: false })
+        {
+            return false;
+        }
+        return p.Pattern.DescendantNodesAndSelf(n => n is PatternSyntax && n is not (RecursivePatternSyntax or ListPatternSyntax))
+            .OfType<BinaryPatternSyntax>()
+            .Where(b => b.IsKind(SyntaxKind.AndPattern))
+            .All(b => NarrowedCast(b.Left) is not "");
+    }
+
+    // the cast for the right side of an "and" whose left side narrows the type; null if it doesn't, "" if it can't be written
+    private string? NarrowedCast(PatternSyntax left)
+    {
+        if (_model.GetOperation(left) is not IPatternOperation op || SymbolEqualityComparer.IncludeNullability.Equals(op.InputType, op.NarrowedType) ||
+            SymbolEqualityComparer.Default.Equals(op.InputType, op.NarrowedType))
+        {
+            return null;
+        }
+        var type = TypeArgument(op.NarrowedType);
+        if (type == null)
+        {
+            return "";
+        }
+        // from a type parameter, through object
+        return op.InputType is ITypeParameterSymbol ? $"({type})(object)" : $"({type})";
+    }
+
+    private static string? TypeArgument(ITypeSymbol type)
+    {
+        static bool Ok(ITypeSymbol t) => t switch
+        {
+            IErrorTypeSymbol or IPointerTypeSymbol or IFunctionPointerTypeSymbol => false,
+            { IsAnonymousType: true } or { IsRefLikeType: true } => false,
+            IArrayTypeSymbol a => Ok(a.ElementType),
+            INamedTypeSymbol n => n.TypeArguments.All(Ok),
+            _ => true
+        };
+        return Ok(type) ? type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) : null;
+    }
+
     private ExpressionSyntax InstrumentDecision(ExpressionSyntax e)
     {
-        var conditions = new List<ExpressionSyntax>();
-        var tree = DecisionTree.Build(e, conditions);
+        var conditions = new List<Condition>();
+        var shape = Structure(e, conditions);
 
         var lineSpan = e.GetLocation().GetLineSpan().StartLinePosition;
         var reason = _excluded.TryGetValue(e.SpanStart, out var excludedReason) ? excludedReason : WhyNotInstrumentable(e, conditions);
@@ -148,10 +303,15 @@ public sealed class DecisionRewriter : CSharpSyntaxRewriter
             Column = lineSpan.Character + 1,
             SpanStart = e.SpanStart,
             Text = e.ToString(),
-            Conditions = conditions.Select(c => c.ToString()).ToList()
+            Shape = shape,
+            Conditions = conditions.Select(c => c.Text).ToList()
         });
 
-        var markers = new McDcFunctions().CreateMarkers(tree);
+        // && || ! only: the markers know statically which value completes the decision (McDcFunctions);
+        // otherwise (& | ^ == != ?:) every marker records the evaluation so far, and the report keeps
+        // the complete ones (see McDcAnalyzer)
+        var tree = DecisionTree.Parse(shape, new List<ExpressionSyntax>(), allOperators: true);
+        var markers = DecisionTree.IsClassic(tree) ? McDcFunctions.CreateMarkers(tree) : null;
         var index = 0;
         return Rewrite(e, id, markers, ref index);
     }
@@ -159,21 +319,46 @@ public sealed class DecisionRewriter : CSharpSyntaxRewriter
     // rewrites the structure of the decision, adding markers to each condition (unless id is null)
     private ExpressionSyntax Rewrite(ExpressionSyntax e, int? id, IReadOnlyList<MarkerFunction>? markers, ref int index)
     {
-        switch (e)
+        switch (OperatorOf(e))
         {
-            case ParenthesizedExpressionSyntax p:
-                return p.WithExpression(Rewrite(p.Expression, id, markers, ref index));
-
-            case BinaryExpressionSyntax b when DecisionTree.IsLogical(b):
+            case Operator.Parentheses:
                 {
+                    var p = (ParenthesizedExpressionSyntax)e;
+                    return p.WithExpression(Rewrite(p.Expression, id, markers, ref index));
+                }
+            case Operator.Logical or Operator.BoolBinary:
+                {
+                    var b = (BinaryExpressionSyntax)e;
                     var l = Rewrite(b.Left, id, markers, ref index);
                     var r = Rewrite(b.Right, id, markers, ref index);
                     return b.WithLeft(l).WithRight(r);
                 }
-
-            case PrefixUnaryExpressionSyntax u when u.IsKind(SyntaxKind.LogicalNotExpression):
-                return u.WithOperand(Rewrite(u.Operand, id, markers, ref index));
-
+            case Operator.Not:
+                {
+                    var u = (PrefixUnaryExpressionSyntax)e;
+                    return u.WithOperand(Rewrite(u.Operand, id, markers, ref index));
+                }
+            case Operator.BoolConditional:
+                {
+                    var c = (ConditionalExpressionSyntax)e;
+                    var condition = Rewrite(c.Condition, id, markers, ref index);
+                    var whenTrue = Rewrite(c.WhenTrue, id, markers, ref index);
+                    var whenFalse = Rewrite(c.WhenFalse, id, markers, ref index);
+                    return c.WithCondition(condition).WithWhenTrue(whenTrue).WithWhenFalse(whenFalse);
+                }
+            case Operator.Patterns when id != null:
+                {
+                    // x is P  ->  (x is var __tarpValue7x0 && (<P on __tarpValue7x0>)): x evaluated once
+                    var p = (IsPatternExpressionSyntax)e;
+                    var input = (ExpressionSyntax)base.Visit(p.Expression)!;
+                    var value = $"__tarpValue{id}x{index}";
+                    var body = RewritePattern(p.Pattern, IdentifierName(value), id.Value, markers, ref index);
+                    var hoisted = ParseExpression($"(__tarpInput is var {value} && __tarpBody)");
+                    hoisted = hoisted.ReplaceNodes(
+                        hoisted.DescendantNodes().OfType<IdentifierNameSyntax>().Where(n => n.Identifier.Text is "__tarpInput" or "__tarpBody"),
+                        (n, _) => ParenthesizedExpression(n.Identifier.Text == "__tarpInput" ? input.WithoutTrivia() : body));
+                    return hoisted.WithTriviaFrom(e);
+                }
             default:
                 {
                     // conditions may contain decisions of their own (e.g. in a lambda), so visit them too
@@ -184,20 +369,58 @@ public sealed class DecisionRewriter : CSharpSyntaxRewriter
                     }
 
                     var i = index++;
-                    return Mark(e, condition, id.Value, i, markers![i]);
+                    return Mark(e, condition, id.Value, i, markers?[i]);
                 }
         }
     }
 
-    // condition: the original, to look at; rewritten: what goes into the output
-    private static ExpressionSyntax Mark(ExpressionSyntax condition, ExpressionSyntax rewritten, int id, int i, MarkerFunction marker)
+    // a pattern as a bool expression on input: and/or/not are &&/||/!, primitive patterns conditions
+    private ExpressionSyntax RewritePattern(PatternSyntax pattern, ExpressionSyntax input, int id, IReadOnlyList<MarkerFunction>? markers, ref int index)
+    {
+        switch (pattern)
+        {
+            case ParenthesizedPatternSyntax p:
+                return RewritePattern(p.Pattern, input, id, markers, ref index);
+
+            case BinaryPatternSyntax b:
+                {
+                    var l = RewritePattern(b.Left, input, id, markers, ref index);
+                    // after "and", the right side tests what the left side narrowed the value to
+                    var cast = b.IsKind(SyntaxKind.AndPattern) ? NarrowedCast(b.Left) : null;
+                    var rightInput = cast == null ? input : ParseExpression($"({cast}{input})");
+                    var r = RewritePattern(b.Right, rightInput, id, markers, ref index);
+                    return BinaryExpression(b.IsKind(SyntaxKind.AndPattern) ? SyntaxKind.LogicalAndExpression : SyntaxKind.LogicalOrExpression,
+                        ParenthesizedExpression(l), ParenthesizedExpression(r));
+                }
+
+            case UnaryPatternSyntax u when u.IsKind(SyntaxKind.NotPattern) && HasCombinator(u.Pattern):
+                return PrefixUnaryExpression(SyntaxKind.LogicalNotExpression, ParenthesizedExpression(RewritePattern(u.Pattern, input, id, markers, ref index)));
+
+            default:
+                {
+                    var test = IsPatternExpression(input, Token(SyntaxKind.IsKeyword).WithLeadingTrivia(Space).WithTrailingTrivia(Space), pattern.WithoutTrivia());
+                    var i = index++;
+                    return Mark(test, test, id, i, markers?[i]);
+                }
+        }
+    }
+
+    /*
+     * condition: the original, to look at; rewritten: what goes into the output. marker: what completes
+     * the decision (null: record every evaluation so far, done = 1).
+     */
+    private static ExpressionSyntax Mark(ExpressionSyntax condition, ExpressionSyntax rewritten, int id, int i, MarkerFunction? marker)
     {
         var frame = "__tarp" + id;
 
         string Call(string name, bool value, bool declare)
         {
-            var outcome = McDcFunctions.DecisionOutcome(marker.Path, value);
-            var done = outcome == null ? 0 : outcome.Value ? 2 : 1;
+            var done = 1;
+            if (marker != null)
+            {
+                var outcome = McDcFunctions.DecisionOutcome(marker.Path, value);
+                done = outcome == null ? 0 : outcome.Value ? 2 : 1;
+            }
             var v = value ? "true" : "false";
             return i == 0
                 ? $"{Runtime}.{name}0(out {(declare ? "var " : "")}{frame}, {id}, {v}, {done})"
@@ -221,7 +444,7 @@ public sealed class DecisionRewriter : CSharpSyntaxRewriter
         not.IsKind(SyntaxKind.NotPattern) &&
         DescendantsOutsideNestedFunctions(not).Any(n => n is SingleVariableDesignationSyntax);
 
-    private string? WhyNotInstrumentable(ExpressionSyntax e, List<ExpressionSyntax> conditions)
+    private string? WhyNotInstrumentable(ExpressionSyntax e, List<Condition> conditions)
     {
         if (conditions.Count > MaxConditions)
         {
@@ -239,16 +462,16 @@ public sealed class DecisionRewriter : CSharpSyntaxRewriter
             return "constant decision";
         }
 
-        // && / || / ! must be the built-in operators on bool, and every condition must convert to bool
-        foreach (var n in e.DescendantNodesAndSelf(n => n == e || n is ExpressionSyntax x && DecisionTree.IsStructural(x)))
+        // && / || / ! must be the built-in operators on bool (& | ^ == != ?: are, by OperatorOf)
+        foreach (var n in e.DescendantNodesAndSelf(n => n == e || n is ExpressionSyntax x && OperatorOf(x) != Operator.None))
         {
-            if (n is ExpressionSyntax x && DecisionTree.IsStructural(x) && x is not ParenthesizedExpressionSyntax &&
+            if (n is ExpressionSyntax x && OperatorOf(x) is Operator.Logical or Operator.Not &&
                 _model.GetTypeInfo(x).Type?.SpecialType != SpecialType.System_Boolean)
             {
                 return "not a bool expression";
             }
         }
-        foreach (var c in conditions)
+        foreach (var c in conditions.Select(c => c.Node).OfType<ExpressionSyntax>())
         {
             // also skips dynamic conditions: their converted type is dynamic
             if (_model.GetTypeInfo(c).ConvertedType?.SpecialType != SpecialType.System_Boolean)
@@ -264,9 +487,9 @@ public sealed class DecisionRewriter : CSharpSyntaxRewriter
 
         foreach (var a in e.Ancestors())
         {
-            if (a is QueryExpressionSyntax)
+            if (a is QueryExpressionSyntax q && IsExpressionTree(q))
             {
-                return "in a query expression";
+                return "in a query that becomes an expression tree";
             }
             if (a is AnonymousFunctionExpressionSyntax f && IsExpressionTree(f))
             {
@@ -277,7 +500,45 @@ public sealed class DecisionRewriter : CSharpSyntaxRewriter
         return null;
     }
 
-    private bool IsExpressionTree(AnonymousFunctionExpressionSyntax f)
+    // in a lambda or a query that becomes an expression tree: no calls to the runtime there
+    protected bool IsInExpressionTree(SyntaxNode node) =>
+        node.AncestorsAndSelf().Any(a => a is QueryExpressionSyntax q && IsExpressionTree(q) || a is AnonymousFunctionExpressionSyntax f && IsExpressionTree(f));
+
+    private readonly Dictionary<QueryExpressionSyntax, bool> _expressionTreeQueries = new();
+
+    // a query is lambdas passed to the methods its clauses bind to (Where, Select, ...): over IQueryable,
+    // those take expression trees; over in-memory collections, delegates
+    private bool IsExpressionTree(QueryExpressionSyntax query)
+    {
+        if (_expressionTreeQueries.TryGetValue(query, out var known))
+        {
+            return known;
+        }
+
+        var methods = new List<ISymbol?>();
+        foreach (var n in query.DescendantNodesAndSelf())
+        {
+            if (n is QueryClauseSyntax clause)
+            {
+                var info = _model.GetQueryClauseInfo(clause);
+                methods.Add(info.OperationInfo.Symbol);
+                methods.Add(info.CastInfo.Symbol);
+            }
+            else if (n is SelectOrGroupClauseSyntax or QueryContinuationSyntax)
+            {
+                methods.Add(_model.GetSymbolInfo(n).Symbol);
+            }
+        }
+
+        // a method that didn't bind (an error) counts as one: better not instrumented than broken
+        var result = methods.Any(m => m is IMethodSymbol method
+            ? method.Parameters.Any(p => p.Type.OriginalDefinition.ToDisplayString() == "System.Linq.Expressions.Expression<TDelegate>")
+            : false) || query.FromClause != null && _model.GetTypeInfo(query.FromClause.Expression).Type is IErrorTypeSymbol;
+        _expressionTreeQueries[query] = result;
+        return result;
+    }
+
+    protected bool IsExpressionTree(AnonymousFunctionExpressionSyntax f)
     {
         var type = _model.GetTypeInfo(f).ConvertedType;
         return type?.OriginalDefinition.ToDisplayString() == "System.Linq.Expressions.Expression<TDelegate>";

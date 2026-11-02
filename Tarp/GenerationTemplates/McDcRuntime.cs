@@ -11,6 +11,9 @@ namespace TarpGen
         private const string ModuleId = "__TARP_MODULE_ID__";
         private const string DefaultHitsDirectory = @"__TARP_HITS_DIR__";
 
+        // line coverage: one flag per probe (see Tarp.McDc.CoverageRewriter)
+        private static readonly bool[] _probes = new bool[__TARP_PROBE_COUNT__];
+
         /*
          * One evaluation of a decision in progress. It is a local of the instrumented code (declared
          * by the first condition's marker with "out var", passed to the others by ref), so it lives
@@ -31,6 +34,62 @@ namespace TarpGen
         {
             System.AppDomain.CurrentDomain.ProcessExit += (s, e) => Dump();
             System.AppDomain.CurrentDomain.DomainUnload += (s, e) => Dump();
+        }
+
+        /*
+         * Read before writing: after its first hit, a probe only reads, so a hot loop doesn't keep
+         * writing its cache line, and threads on other cores keep their copies of it (no false sharing).
+         * A bool per probe, not a bit: each probe's write is its own, so threads never lose each other's.
+         */
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+        private static void Hit(int id)
+        {
+            if (!_probes[id])
+            {
+                _probes[id] = true;
+            }
+        }
+
+        // runs right before a statement
+        public static void P(int id)
+        {
+            Hit(id);
+        }
+
+        // probes inside expressions: (PF(id) && false || (c)) is c, "when PT(id)" is always true,
+        // PV(id, v) is v, PN(id, v) is v and runs the probe when v isn't null
+        public static bool PF(int id)
+        {
+            Hit(id);
+            return false;
+        }
+
+        public static bool PT(int id)
+        {
+            Hit(id);
+            return true;
+        }
+
+        public static T PV<T>(int id, T value)
+        {
+            Hit(id);
+            return value;
+        }
+
+        // a?.b: one probe for "not null", one for "null"
+        public static T PNN<T>(int notNull, int isNull, T value)
+        {
+            Hit(value != null ? notNull : isNull);
+            return value;
+        }
+
+        public static T PN<T>(int id, T value)
+        {
+            if (value != null)
+            {
+                Hit(id);
+            }
+            return value;
         }
 
         /*
@@ -98,7 +157,14 @@ namespace TarpGen
         internal static string Snapshot()
         {
             var sb = new System.Text.StringBuilder();
-            sb.Append("tarp-mcdc 1 ").Append(ModuleId).Append('\n');
+            sb.Append("tarp-mcdc 2 ").Append(ModuleId).Append('\n');
+            for (var i = 0; i < _probes.Length; i++)
+            {
+                if (_probes[i])
+                {
+                    sb.Append("p ").Append(i).Append('\n');
+                }
+            }
             foreach (var key in _hits.Keys)
             {
                 var id = (int)(key >> 33);
@@ -119,7 +185,7 @@ namespace TarpGen
                 {
                     dir = DefaultHitsDirectory;
                 }
-                if (string.IsNullOrEmpty(dir) || _hits.IsEmpty)
+                if (string.IsNullOrEmpty(dir) || _hits.IsEmpty && System.Array.IndexOf(_probes, true) < 0)
                 {
                     return;
                 }

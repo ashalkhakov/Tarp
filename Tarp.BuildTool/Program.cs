@@ -13,13 +13,10 @@ internal class Program
         .ConfigureServices(services =>
         {
             services.AddSingleton<IFileSystem, FileSystem>();
-            services.AddSingleton<TarpPreprocessor>();
             services.AddSingleton<McDcProjectInstrumenter>();
         })
         .RunCommandLineApplicationAsync(args, (app) =>
         {
-            var preprocessor = app.GetRequiredService<TarpPreprocessor>();
-
             app.HelpOption();
 
             app.Command("mcdc-instrument", cmd =>
@@ -85,24 +82,7 @@ internal class Program
                 });
             });
 
-            // not IsRequired(): that would also be enforced when running a subcommand
-            var project = app.Option("-p|--project <PROJECT>", "The input project", CommandOptionType.SingleValue);
-            var outputDirectory = app.Option("-o|--output <OUTPUT>", "The output directory", CommandOptionType.SingleValue);
-
-            app.OnExecuteAsync(async (CancellationToken cts) =>
-            {
-                if (!project.HasValue())
-                {
-                    Console.Error.WriteLine("Please provide path to the input project");
-                    return 1;
-                }
-                if (!outputDirectory.HasValue())
-                {
-                    Console.Error.WriteLine("Please provide output directory for generated files");
-                    return 1;
-                }
-                await preprocessor.ProcessAssembly(project.Value()!, outputDirectory.Value()!, cts);
-                return 0;
-            });
+            // with no command: the commands
+            app.OnExecute(() => app.ShowHelp());
         });
 }

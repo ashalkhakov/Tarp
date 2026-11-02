@@ -27,6 +27,13 @@ dotnet tool install dotnet-tarp --add-source "$nupkg" --version "$version"
 dotnet tarp test --tarp-report report.txt
 cat report.txt
 
+# line, branch, function and condition coverage
+grep -E "^  Lines +10/10 " report.txt
+grep -E "^  Branches +9/10 " report.txt
+grep -E "^  Functions +4/4 .*exits 7/7" report.txt
+grep -E "^  Conditions +6/11 " report.txt
+grep -F "line 24: o is null was only true" report.txt
+# MC/DC
 grep -F "Summary: 5 decisions (0 never executed), 5/11 conditions shown (45.5%), 0 decisions not instrumented" report.txt
 grep -F "c0 paid: NOT shown, missing false" report.txt
 grep -F "try: c0=F c1=- c2=F" report.txt

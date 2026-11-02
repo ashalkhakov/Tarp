@@ -16,7 +16,7 @@ namespace TarpTests.McDc;
 [TestClass]
 public class McDcEndToEndTests
 {
-    private sealed class Program
+    internal sealed class Program
     {
         public required McDcMap Map { get; init; }
         public required Assembly Original { get; init; }
@@ -34,12 +34,18 @@ public class McDcEndToEndTests
             return actual;
         }
 
-        public List<DecisionResult> Results()
-        {
-            var snapshot = (string)Instrumented.GetType("TarpGen.McDc")!
+        private string Snapshot() =>
+            (string)Instrumented.GetType("TarpGen.McDc")!
                 .GetMethod("Snapshot", BindingFlags.Static | BindingFlags.NonPublic)!
                 .Invoke(null, null)!;
-            var results = McDcReport.Analyze(Map, McDcHits.Parse(snapshot, Map.ModuleId));
+
+        public IReadOnlySet<int> Probes() => McDcHits.ParseProbes(Snapshot(), Map.ModuleId).ToHashSet();
+
+        public FileCoverage Coverage() => FileCoverage.Of(new ModuleResult(Map, Results(), Probes())).Single();
+
+        public List<DecisionResult> Results()
+        {
+            var results = McDcReport.Analyze(Map, McDcHits.Parse(Snapshot(), Map.ModuleId));
             results.SelectMany(r => r.Inconsistent).Should().BeEmpty();
             return results;
         }
@@ -60,19 +66,19 @@ public class McDcEndToEndTests
         .Select(p => MetadataReference.CreateFromFile(p))
         .ToArray();
 
-    private static Program Build(string source)
+    internal static Program Build(string source, OutputKind kind = OutputKind.DynamicallyLinkedLibrary)
     {
         var tree = CSharpSyntaxTree.ParseText(source, path: "T.cs");
-        var compilation = Compile("Original", tree);
+        var compilation = Compile("Original", kind, tree);
 
         var map = new McDcMap { ModuleId = "test" };
-        var rewriter = new DecisionRewriter(compilation.GetSemanticModel(tree), map, "T.cs");
+        var rewriter = new CoverageRewriter(compilation.GetSemanticModel(tree), map, "T.cs");
         var root = McDcProjectInstrumenter.WithPrologue((CompilationUnitSyntax)rewriter.Visit(tree.GetRoot())!, "T.cs");
         var instrumentedSource = root.ToFullString();
 
-        var instrumented = Compile("Instrumented",
+        var instrumented = Compile("Instrumented", kind,
             CSharpSyntaxTree.ParseText(instrumentedSource, path: "T.instrumented.cs"),
-            CSharpSyntaxTree.ParseText(McDcRuntimeSource.Generate(map.ModuleId, ""), path: McDcRuntimeSource.FileName));
+            CSharpSyntaxTree.ParseText(McDcRuntimeSource.Generate(map.ModuleId, "", map.Probes.Count), path: McDcRuntimeSource.FileName));
 
         return new Program
         {
@@ -83,8 +89,8 @@ public class McDcEndToEndTests
         };
     }
 
-    private static CSharpCompilation Compile(string name, params SyntaxTree[] trees) =>
-        CSharpCompilation.Create(name, trees, References, new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+    private static CSharpCompilation Compile(string name, OutputKind kind, params SyntaxTree[] trees) =>
+        CSharpCompilation.Create(name, trees, References, new CSharpCompilationOptions(kind));
 
     private static Assembly Load(CSharpCompilation compilation, string? source = null)
     {
