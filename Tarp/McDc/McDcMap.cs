@@ -90,7 +90,8 @@ public class FunctionEntry
     public List<int> Exits { get; set; } = new();
 }
 
-// a branch point other than a decision: a switch statement or expression, ??, ?., a foreach, or a try with catches
+// a branch point other than a decision: a switch statement or expression, ??, ?., a foreach, a try with
+// catches, or the ways into a finally
 public class SwitchEntry
 {
     public const string Statement = "switch";
@@ -99,6 +100,7 @@ public class SwitchEntry
     public const string ConditionalAccess = "?.";
     public const string ForEach = "foreach";
     public const string Try = "try";
+    public const string Finally = "finally";
 
     public int Id { get; set; }
     public string Kind { get; set; } = Statement;

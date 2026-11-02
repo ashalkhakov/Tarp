@@ -80,6 +80,13 @@ namespace TarpGen
             return false;
         }
 
+        // a finally, entered: state 0 1 2 from the try block, 10+k 20+k 30+k from catch k (see
+        // Tarp.McDc.CoverageRewriter.VisitTryStatement); its probes start at first, three per part
+        public static void Finally(int first, int state)
+        {
+            Hit(state < 10 ? first + state : first + 3 + 3 * (state % 10) + state / 10 - 1);
+        }
+
         // a?.b: one probe for "not null", one for "null"
         public static T PNN<T>(int notNull, int isNull, T value)
         {

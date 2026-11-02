@@ -63,7 +63,7 @@ public sealed class CoverageRewriter : DecisionRewriter
             result is StatementSyntax rewritten && ShouldProbe(original))
         {
             var probe = ProbeStatement(ProbeFor(original));
-            return Block(List(new[] { probe.WithTrailingTrivia(Space) }.Concat(WithForEachBranch(original, rewritten.WithoutTrivia()))))
+            return Block(List(new[] { probe.WithTrailingTrivia(Space) }.Concat(FinallyPathsOfJump(original)).Concat(WithForEachBranch(original, rewritten.WithoutTrivia()))))
                 .WithOpenBraceToken(Token(SyntaxKind.OpenBraceToken).WithLeadingTrivia(rewritten.GetLeadingTrivia()).WithTrailingTrivia(Space))
                 .WithCloseBraceToken(Token(SyntaxKind.CloseBraceToken).WithLeadingTrivia(Space).WithTrailingTrivia(rewritten.GetTrailingTrivia()));
         }
@@ -135,6 +135,7 @@ public sealed class CoverageRewriter : DecisionRewriter
             else
             {
                 result.Add(probe.WithLeadingTrivia(r.GetLeadingTrivia()).WithTrailingTrivia(Space));
+                result.AddRange(FinallyPathsOfJump(o));
                 result.AddRange(WithForEachBranch(o, r.WithLeadingTrivia()));
             }
         }
@@ -150,6 +151,16 @@ public sealed class CoverageRewriter : DecisionRewriter
      */
     private IEnumerable<StatementSyntax> WithForEachBranch(StatementSyntax original, StatementSyntax rewritten)
     {
+        // a try with a finally: the local that says how far it got (see VisitTryStatement)
+        if (original is TryStatementSyntax t && _finallyPaths.TryGetValue(t, out var paths))
+        {
+            return new[]
+            {
+                ParseStatement($"int __tarpPath{paths} = 0;").WithLeadingTrivia(rewritten.GetLeadingTrivia()).WithTrailingTrivia(Space),
+                rewritten.WithLeadingTrivia()
+            };
+        }
+
         if (original is not CommonForEachStatementSyntax loop || rewritten is not CommonForEachStatementSyntax r ||
             r.Statement is not BlockSyntax body || IsExcludedFromCoverage(original))
         {
@@ -407,7 +418,23 @@ public sealed class CoverageRewriter : DecisionRewriter
      */
     public override SyntaxNode? VisitTryStatement(TryStatementSyntax node)
     {
+        // the probes of the ways into the finally, before the body's: its jumps need them (FinallyPathsOfJump)
+        var withPaths = node.Finally != null && node.Catches.Count <= 9 && !IsExcludedFromCoverage(node) && !YieldsReturn(node.Block);
+        if (withPaths)
+        {
+            var first = Map.Probes.Count;
+            for (var i = 0; i < 3 + 3 * node.Catches.Count; i++)
+            {
+                NewProbe(node.Finally!, node.Finally!.FinallyKeyword.Span, ProbeEntry.Branch);
+            }
+            _finallyPaths[node] = first;
+        }
+
         var rewritten = (TryStatementSyntax)base.VisitTryStatement(node)!;
+        if (withPaths)
+        {
+            rewritten = WithFinallyPaths(node, rewritten, _finallyPaths[node]);
+        }
         if (node.Catches.Count == 0 || IsExcludedFromCoverage(node))
         {
             return rewritten;
@@ -429,6 +456,165 @@ public sealed class CoverageRewriter : DecisionRewriter
             entry.Sections.Add(_firstProbe.TryGetValue(c.Block, out var first) ? first : -1);
         }
         return rewritten;
+    }
+
+    // try statements with a finally whose ways in are recorded: the first of their probes
+    private readonly Dictionary<TryStatementSyntax, int> _finallyPaths = new();
+
+    /*
+     * Which way a finally was entered: a local says how far the protected code got, and the finally
+     * records it when it starts (McDc.Finally). Nothing else changes:
+     *
+     *   int __tarpPath9 = 0;                      0: in the try block (an exception that isn't caught here)
+     *   try { ... __tarpPath9 = 1; }              1: the try block completed
+     *                                             2: a return, break, continue or goto out of the try block
+     *   catch (E) { __tarpPath9 = 10; ... __tarpPath9 = 20; }
+     *                                             10+k: in catch k (an exception from it), 20+k: completed,
+     *                                             30+k: a jump out of it
+     *   finally { McDc.Finally(9, __tarpPath9); ... }
+     *
+     * Only the ways in that can happen are branches: no "not caught here" with a catch-all, "an exception
+     * from catch k" only when it throws, "completed" only when the end can be reached. Not for a try
+     * block with yield return: stopping the enumeration runs the finally too.
+     */
+    private TryStatementSyntax WithFinallyPaths(TryStatementSyntax node, TryStatementSyntax rewritten, int first)
+    {
+        var path = "__tarpPath" + first;
+        StatementSyntax Set(int value) => ParseStatement($"{path} = {value};");
+
+        var entry = new SwitchEntry { Id = Map.Switches.Count, File = DisplayPath, Line = Line(node.Finally!), Kind = SwitchEntry.Finally };
+        Map.Switches.Add(entry);
+        void Way(int value, string label)
+        {
+            entry.Labels.Add(label);
+            entry.Sections.Add(value < 10 ? first + value : first + 3 + 3 * (value % 10) + value / 10 - 1);
+        }
+
+        if (!node.Catches.Any(c => c.Filter == null && (c.Declaration == null ||
+                Model.GetTypeInfo(c.Declaration.Type).Type?.ToDisplayString() == "System.Exception")))
+        {
+            Way(0, "an exception from the try block, not caught here");
+        }
+        if (EndIsReachable(node.Block))
+        {
+            Way(1, "the try block completed");
+            rewritten = rewritten.WithBlock(Append(rewritten.Block, Set(1)));
+        }
+        if (LeavingJumps(node.Block, node).Any())
+        {
+            Way(2, "a return, break, continue or goto out of the try block");
+        }
+
+        var catches = new List<CatchClauseSyntax>();
+        for (var k = 0; k < node.Catches.Count; k++)
+        {
+            var c = node.Catches[k];
+            var r = rewritten.Catches[k];
+            var name = "catch" + (c.Declaration != null ? " " + c.Declaration : "");
+            if (OutsideNestedFunctions(c.Block).Any(n => n is ThrowStatementSyntax or ThrowExpressionSyntax))
+            {
+                Way(10 + k, $"an exception from {name}");
+            }
+            var block = Prepend(r.Block, Set(10 + k));
+            if (EndIsReachable(c.Block))
+            {
+                Way(20 + k, $"{name} completed");
+                block = Append(block, Set(20 + k));
+            }
+            if (LeavingJumps(c.Block, node).Any())
+            {
+                Way(30 + k, $"a return, break, continue or goto out of {name}");
+            }
+            catches.Add(r.WithBlock(block));
+        }
+
+        var finallyBlock = Prepend(rewritten.Finally!.Block, ParseStatement($"{Runtime}.Finally({first}, {path});"));
+        return rewritten.WithCatches(List(catches)).WithFinally(rewritten.Finally.WithBlock(finallyBlock));
+    }
+
+    // before a jump out of try statements whose ways into their finally are recorded: where it jumps from
+    private IEnumerable<StatementSyntax> FinallyPathsOfJump(StatementSyntax jump)
+    {
+        if (jump is not (ReturnStatementSyntax or BreakStatementSyntax or ContinueStatementSyntax or GotoStatementSyntax) &&
+            !(jump is YieldStatementSyntax y && y.IsKind(SyntaxKind.YieldBreakStatement)))
+        {
+            yield break;
+        }
+        foreach (var t in jump.Ancestors().TakeWhile(a => a is not (AnonymousFunctionExpressionSyntax or LocalFunctionStatementSyntax or MemberDeclarationSyntax))
+                     .OfType<TryStatementSyntax>())
+        {
+            if (!_finallyPaths.TryGetValue(t, out var first) || !Leaves(jump, t))
+            {
+                continue;
+            }
+            var k = t.Catches.IndexOf(c => c.Block.Span.Contains(jump.Span));
+            if (t.Block.Span.Contains(jump.Span))
+            {
+                yield return ParseStatement($"__tarpPath{first} = 2;").WithTrailingTrivia(Space);
+            }
+            else if (k >= 0)
+            {
+                yield return ParseStatement($"__tarpPath{first} = {30 + k};").WithTrailingTrivia(Space);
+            }
+        }
+    }
+
+    private static IEnumerable<StatementSyntax> LeavingJumps(BlockSyntax block, TryStatementSyntax t) =>
+        OutsideNestedFunctions(block).OfType<StatementSyntax>()
+            .Where(s => s is ReturnStatementSyntax or BreakStatementSyntax or ContinueStatementSyntax or GotoStatementSyntax ||
+                        s is YieldStatementSyntax y && y.IsKind(SyntaxKind.YieldBreakStatement))
+            .Where(s => Leaves(s, t));
+
+    // a jump that goes past the try statement (so that its finally runs)
+    private static bool Leaves(StatementSyntax jump, TryStatementSyntax t)
+    {
+        switch (jump)
+        {
+            case ReturnStatementSyntax or YieldStatementSyntax:
+                return true;
+            case BreakStatementSyntax or ContinueStatementSyntax:
+                {
+                    // its loop (or, for break, switch) is around the try statement
+                    var target = jump.Ancestors().FirstOrDefault(a =>
+                        a is ForStatementSyntax or CommonForEachStatementSyntax or WhileStatementSyntax or DoStatementSyntax ||
+                        a is SwitchStatementSyntax && jump is BreakStatementSyntax);
+                    return target != null && target.Span.Contains(t.Span);
+                }
+            case GotoStatementSyntax g when g.IsKind(SyntaxKind.GotoStatement):
+                {
+                    var name = g.Expression?.ToString();
+                    var function = jump.Ancestors().FirstOrDefault(a => a is BaseMethodDeclarationSyntax or AccessorDeclarationSyntax or LocalFunctionStatementSyntax or AnonymousFunctionExpressionSyntax or CompilationUnitSyntax);
+                    var label = function?.DescendantNodes().OfType<LabeledStatementSyntax>().FirstOrDefault(l => l.Identifier.Text == name);
+                    return label != null && !t.Span.Contains(label.Span);
+                }
+            case GotoStatementSyntax:
+                {
+                    // goto case, goto default: its switch is around the try statement
+                    var target = jump.Ancestors().OfType<SwitchStatementSyntax>().FirstOrDefault();
+                    return target != null && target.Span.Contains(t.Span);
+                }
+            default:
+                return false;
+        }
+    }
+
+    private static bool YieldsReturn(BlockSyntax block) =>
+        OutsideNestedFunctions(block).OfType<YieldStatementSyntax>().Any(y => y.IsKind(SyntaxKind.YieldReturnStatement));
+
+    private static IEnumerable<SyntaxNode> OutsideNestedFunctions(SyntaxNode node) =>
+        node.DescendantNodes(n => n is not (AnonymousFunctionExpressionSyntax or LocalFunctionStatementSyntax));
+
+    // a statement at the start of a block, on the line of its {
+    private static BlockSyntax Prepend(BlockSyntax block, StatementSyntax statement)
+    {
+        if (block.Statements.Count == 0)
+        {
+            return block.WithStatements(SingletonList(statement.WithLeadingTrivia(Space).WithTrailingTrivia(Space)));
+        }
+        var first = block.Statements[0];
+        return block.WithStatements(block.Statements
+            .Replace(first, first.WithLeadingTrivia())
+            .Insert(0, statement.WithLeadingTrivia(first.GetLeadingTrivia()).WithTrailingTrivia(Space)));
     }
 
     // a statement at the end of a block, on the line of its }
