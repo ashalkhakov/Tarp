@@ -22,7 +22,7 @@ var root = (CompilationUnitSyntax)new CoverageRewriter(original.GetSemanticModel
 var instrumented = CSharpCompilation.Create("Instrumented",
     new[]
     {
-        CSharpSyntaxTree.ParseText(McDcProjectInstrumenter.WithPrologue(root, "Cases.cs").ToFullString(), path: "Cases.instrumented.cs"),
+        CSharpSyntaxTree.ParseText(McDcProjectInstrumenter.WithPrologue(root, "Cases.cs", original.Options.NullableContextOptions).ToFullString(), path: "Cases.instrumented.cs"),
         CSharpSyntaxTree.ParseText(McDcRuntimeSource.Generate(map.ModuleId, "", map.Probes.Count))
     },
     references, new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));

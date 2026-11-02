@@ -28,6 +28,10 @@ dotnet tool install dotnet-tarp --add-source "$nupkg" --version "$version"
 dotnet tarp test --tarp-report report.txt --tarp-lcov coverage.info --tarp-cobertura coverage/cobertura.xml --tarp-markdown report.md --tarp-html report.html
 cat report.txt
 
+# the rewritten sources left in obj/ are marked generated: a format hook over the folder skips them
+ls Shop.Core/obj/Debug/net10.0/tarp/src/*.cs
+dotnet format whitespace . --folder --verify-no-changes
+
 # line, branch, function and condition coverage
 grep -E "^  Lines +10/10 " report.txt
 grep -E "^  Branches +9/10 " report.txt

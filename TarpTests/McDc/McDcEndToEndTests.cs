@@ -73,7 +73,7 @@ public class McDcEndToEndTests
 
         var map = new McDcMap { ModuleId = "test" };
         var rewriter = new CoverageRewriter(compilation.GetSemanticModel(tree), map, "T.cs", exceptionExits: exceptionExits);
-        var root = McDcProjectInstrumenter.WithPrologue((CompilationUnitSyntax)rewriter.Visit(tree.GetRoot())!, "T.cs");
+        var root = McDcProjectInstrumenter.WithPrologue((CompilationUnitSyntax)rewriter.Visit(tree.GetRoot())!, "T.cs", compilation.Options.NullableContextOptions);
         var instrumentedSource = root.ToFullString();
 
         var instrumented = Compile("Instrumented", kind,
