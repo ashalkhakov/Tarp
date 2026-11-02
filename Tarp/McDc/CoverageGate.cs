@@ -15,13 +15,17 @@ namespace Tarp.McDc;
  *                                          ? one character
  *   Shop.Core/Orders.cs:68                 everything on a line: its lines, its decisions' outcomes and
  *                                          conditions, its branch points
- *   Shop.Core/Orders.cs:68 day.Year == y   one condition of the decisions on a line (MC/DC only)
+ *   Shop.Core/Orders.cs:18 id.Length < 20  one condition of the decisions on a line (MC/DC only)
+ *   Shop.Core/Orders.cs:68 [false]         one branch on a line (branches only): a decision's outcome,
+ *                                          [true] or [false], or a branch point's way, as the text
+ *                                          report names it after "not taken:" ([default:], [_],
+ *                                          [no iterations], [catch (IOException)], ...)
  *
  * Only the gate leaves them out: the reports still show them.
  */
 public sealed class CoverageExclusions
 {
-    public sealed record Entry(string Text, Regex File, int? Line, string? Condition);
+    public sealed record Entry(string Text, Regex File, int? Line, string? Condition, string? Branch);
 
     // path, then :line, then the condition after a space
     private static readonly Regex Syntax = new(@"^(?<path>.+?)(:(?<line>\d+)(\s+(?<condition>.+))?)?$", RegexOptions.CultureInvariant);
@@ -44,9 +48,11 @@ public sealed class CoverageExclusions
                 continue;
             }
             var m = Syntax.Match(text);
+            var after = m.Groups["condition"].Success ? McDcReport.OneLine(m.Groups["condition"].Value) : null;
+            var branch = after != null && after.StartsWith('[') && after.EndsWith(']') ? after[1..^1].Trim() : null;
             entries.Add(new Entry(text, Glob(m.Groups["path"].Value.Replace('\\', '/')),
                 m.Groups["line"].Success ? int.Parse(m.Groups["line"].Value, CultureInfo.InvariantCulture) : null,
-                m.Groups["condition"].Success ? McDcReport.OneLine(m.Groups["condition"].Value) : null));
+                branch == null ? after : null, branch));
         }
         return new CoverageExclusions(entries);
     }
@@ -54,7 +60,10 @@ public sealed class CoverageExclusions
     // the whole-file entries for a file, the whole-line entries for a line of it, and a condition's entries
     public IReadOnlyList<Entry> ForFile(string file) => Matching(file, e => e.Line == null);
 
-    public IReadOnlyList<Entry> ForLine(string file, int line) => Matching(file, e => e.Line == line && e.Condition == null);
+    public IReadOnlyList<Entry> ForLine(string file, int line) => Matching(file, e => e.Line == line && e.Condition == null && e.Branch == null);
+
+    public IReadOnlyList<Entry> ForBranch(string file, int line, string label) =>
+        Matching(file, e => e.Line == line && e.Branch == McDcReport.OneLine(label));
 
     public IReadOnlyList<Entry> ForCondition(string file, int line, string condition) =>
         Matching(file, e => e.Line == line && e.Condition == McDcReport.OneLine(condition));
@@ -119,6 +128,17 @@ public static class CoverageGate
         bool DecisionGap(DecisionResult d) =>
             thresholds.Branches != null && !(d.OutcomeTrue && d.OutcomeFalse) || thresholds.McDc != null && d.Conditions.Any(c => !c.Covered);
         bool SwitchGap(SwitchCoverage s) => thresholds.Branches != null && s.Taken < s.Total;
+        void Branch(FileCoverage f, int line, string label, bool wasTaken)
+        {
+            var forBranch = exclusions.ForBranch(f.File, line, label);
+            if (forBranch.Count > 0)
+            {
+                Gap(forBranch, thresholds.Branches != null && !wasTaken);
+                return;
+            }
+            branches++;
+            taken += wasTaken ? 1 : 0;
+        }
 
         foreach (var f in modules.SelectMany(FileCoverage.Of))
         {
@@ -148,8 +168,10 @@ public static class CoverageGate
                     Gap(forLine, DecisionGap(d));
                     continue;
                 }
-                branches += 2;
-                taken += (d.OutcomeTrue ? 1 : 0) + (d.OutcomeFalse ? 1 : 0);
+                foreach (var (outcome, wasTaken) in new[] { ("true", d.OutcomeTrue), ("false", d.OutcomeFalse) })
+                {
+                    Branch(f, d.Decision.Line, outcome, wasTaken);
+                }
                 foreach (var c in d.Conditions)
                 {
                     var forCondition = exclusions.ForCondition(f.File, d.Decision.Line, c.Text);
@@ -170,8 +192,10 @@ public static class CoverageGate
                     Gap(forLine, SwitchGap(s));
                     continue;
                 }
-                branches += s.Total;
-                taken += s.Taken;
+                foreach (var (label, wasTaken) in s.Branches)
+                {
+                    Branch(f, s.Switch.Line, label, wasTaken);
+                }
             }
         }
 

@@ -203,26 +203,29 @@ public static class McDcReport
             }
         }
 
-        foreach (var s in parts.SelectMany(p => p.Switches).OrderBy(s => s.Switch.Line))
+        // the branches not taken, by line: each as "<kind> at line <n>: <what> not taken: <labels>", the
+        // labels as a gate's exclusion entry names them (path:line [label])
+        var branches = new List<(int Line, string Text)>();
+        foreach (var s in parts.SelectMany(p => p.Switches).Where(s => s.NotTaken.Count > 0))
         {
-            if (s.NotTaken.Count > 0)
+            var what = s.Switch.Kind switch
             {
-                var what = s.Switch.Kind switch
-                {
-                    SwitchEntry.Expression => "arms",
-                    SwitchEntry.Coalesce => "sides",
-                    SwitchEntry.ConditionalAccess or SwitchEntry.ForEach or SwitchEntry.Try => "branches",
-                    SwitchEntry.Finally => "ways in",
-                    _ => "sections"
-                };
-                sb.AppendLine(CultureInfo.InvariantCulture, $"  {s.Switch.Kind} at line {s.Switch.Line}: {what} not taken: {string.Join("; ", s.NotTaken)}");
-            }
+                SwitchEntry.Expression => "arms",
+                SwitchEntry.Coalesce => "sides",
+                SwitchEntry.ConditionalAccess or SwitchEntry.ForEach or SwitchEntry.Try => "branches",
+                SwitchEntry.Finally => "ways in",
+                _ => "sections"
+            };
+            branches.Add((s.Switch.Line, $"{s.Switch.Kind} at line {s.Switch.Line}: {what} not taken: {string.Join("; ", s.NotTaken)}"));
         }
-
-        foreach (var d in parts.SelectMany(p => p.Decisions).Where(d => d.Executed && !(d.OutcomeTrue && d.OutcomeFalse)))
+        foreach (var d in parts.SelectMany(p => p.Decisions).Where(d => !(d.OutcomeTrue && d.OutcomeFalse)))
         {
-            sb.AppendLine(CultureInfo.InvariantCulture,
-                $"  line {d.Decision.Line}: {OneLine(d.Decision.Text)} was only {(d.OutcomeTrue ? "true" : "false")}");
+            var notTaken = new[] { d.OutcomeTrue ? null : "true", d.OutcomeFalse ? null : "false" }.Where(o => o != null);
+            branches.Add((d.Decision.Line, $"decision at line {d.Decision.Line}: outcomes not taken: {string.Join("; ", notTaken)} ({OneLine(d.Decision.Text)})"));
+        }
+        foreach (var b in branches.OrderBy(b => b.Line))
+        {
+            sb.AppendLine(CultureInfo.InvariantCulture, $"  {b.Text}");
         }
 
         sb.AppendLine();

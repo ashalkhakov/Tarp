@@ -121,12 +121,19 @@ of conditions shown, as in the summary. `--tarp-exclusions <file>` leaves known 
 Shop.Core/Generated/**/*.cs
 # a defensive check that can't fail: everything on line 68 (its lines, decisions, branch points)
 Shop.Core/Orders.cs:68
-# one condition of the decisions on line 91: the others there are still checked
-Shop.Core/Orders.cs:91 day.Year == month.Year
+# one condition of the decisions on line 18: the others there are still checked
+Shop.Core/Orders.cs:18 id.Length < 20
+# one branch: a decision's outcome on line 24, a switch's default on line 120
+Shop.Core/Orders.cs:24 [false]
+Shop.Core/Orders.cs:120 [default:]
 ```
 
-`*` matches within a directory, `**` across directories. A condition entry leaves out MC/DC only; the
-line's outcomes and branch points need a line entry. The gate prints its numbers, and the exclusions
+`*` matches within a directory, `**` across directories. A condition entry leaves out MC/DC only, a
+branch entry branches only. A branch is named as the text report names it after "not taken:", e.g.
+`decision at line 24: outcomes not taken: false (...)` or `switch at line 120: sections not taken:
+default:`; other branch points' ways are `[_]` (an arm), `[no iterations]`, `[catch (IOException)]`
+and so on. So a baseline can be made from the text report: an entry per condition "NOT shown" and per
+branch "not taken". The gate prints its numbers, and the exclusions
 that leave out no gap of a checked metric: closed by a test since, or no code there.
 `--tarp-strict-exclusions` makes those fail the gate, so that the list can only shrink: a ratchet.
 `dotnet tarp mcdc-report` takes the same options without `tarp-`: `--fail-under-mcdc 95
