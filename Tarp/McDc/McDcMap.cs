@@ -16,6 +16,8 @@ public class McDcMap
     public List<ProbeEntry> Probes { get; set; } = new();
     public List<FunctionEntry> Functions { get; set; } = new();
     public List<SwitchEntry> Switches { get; set; } = new();
+    // the source files: display path (as in the entries) -> full path (lcov and HTML reports read them)
+    public Dictionary<string, string> Sources { get; set; } = new();
 
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 

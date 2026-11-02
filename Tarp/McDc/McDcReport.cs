@@ -222,7 +222,7 @@ public static class McDcReport
     }
 
     // 3, 4, 5, 9 -> "3-5, 9"
-    private static string Ranges(List<int> sorted)
+    internal static string Ranges(List<int> sorted)
     {
         var parts = new List<string>();
         for (var i = 0; i < sorted.Count;)
@@ -238,7 +238,7 @@ public static class McDcReport
         return string.Join(", ", parts);
     }
 
-    private static void FormatDecision(StringBuilder sb, DecisionResult r)
+    internal static void FormatDecision(StringBuilder sb, DecisionResult r)
     {
         var d = r.Decision;
         sb.AppendLine(CultureInfo.InvariantCulture, $"{d.File}:{d.Line}:{d.Column}  {OneLine(d.Text)}");
@@ -300,6 +300,6 @@ public static class McDcReport
         return s.PadRight(width);
     }
 
-    private static string OneLine(string text) =>
+    internal static string OneLine(string text) =>
         string.Join(" ", text.Split(new[] { '\r', '\n', '\t', ' ' }, StringSplitOptions.RemoveEmptyEntries));
 }

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # End-to-end check of the tool as users get it: packs Tarp, installs it as a local tool into a
-# copy of samples/Shop, runs `dotnet tarp test`, and checks the report against known numbers.
+# copy of samples/Shop, runs `dotnet tarp test`, and checks the reports against known numbers.
+# With GENHTML set (lcov 2.x's genhtml), also checks that lcov reads the tracefile.
 #
 #   samples/e2e.sh [nupkg directory]   (default: pack the working tree)
 set -euo pipefail
@@ -24,7 +25,7 @@ cd "$work/Shop"
 dotnet new tool-manifest
 dotnet tool install dotnet-tarp --add-source "$nupkg" --version "$version"
 
-dotnet tarp test --tarp-report report.txt
+dotnet tarp test --tarp-report report.txt --tarp-lcov coverage.info --tarp-markdown report.md --tarp-html report.html
 cat report.txt
 
 # line, branch, function and condition coverage
@@ -42,6 +43,24 @@ grep -F "try: c0=F c1=- c2=F" report.txt
 # a decision with a pattern variable, used in the condition after it
 grep -F "c0 o is string s: shown" report.txt
 grep -F "c1 s.Length > 0: NOT shown, missing false" report.txt
+
+# the lcov tracefile: the same numbers, MC/DC per condition and sense
+# SF: the source's full path, so that lcov tools find it
+grep -E '^SF:([A-Za-z]:)?[/\\].*Shop\.Core[/\\]Orders\.cs$' coverage.info
+for record in LF:10 LH:10 BRF:10 BRH:9 FNF:4 FNH:4 MCF:22 MCH:16 DA:12,3 "MCDC:12,3,f,0,0,paid"; do
+    grep -Fx "$record" coverage.info
+done
+# Markdown and HTML: the summary, and MC/DC as tables
+grep -F '| MC/DC | 5 | 11 | 45.5% |' report.md
+grep -F '| c0 | `paid` | ✓ | ✗ | **not shown** | `c0=F c1=- c2=F` |' report.md
+grep -F '<td class="gap">not shown</td><td><code>c0=F c1=- c2=F</code></td>' report.html
+if [ -n "${GENHTML:-}" ]; then
+    "$GENHTML" --branch-coverage --mcdc-coverage coverage.info -o html 2>&1 | tee genhtml.txt
+    grep -E "lines\.*: 100\.0% \(10 of 10 lines\)" genhtml.txt
+    grep -E "branches\.*: 90\.0% \(9 of 10 branches\)" genhtml.txt
+    grep -E "functions\.*: 100\.0% \(4 of 4 functions\)" genhtml.txt
+    grep -E "MC/DCs\.*: 72\.7% \(16 of 22 MC/DCs\)" genhtml.txt
+fi
 
 # a normal build afterwards compiles the original sources again
 dotnet build

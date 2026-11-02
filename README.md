@@ -23,7 +23,10 @@ From one run of your tests, in source terms (what you wrote, not the compiled IL
   `switch` section (including "no case matched" for a switch without a `default`, when some value can
   match none), every switch expression arm, both sides of `??`, null and not null for `?.` and `?[]`,
   whether a `foreach` iterated at all, and for a `try` with `catch` clauses: each catch clause, and the
-  try block completing without an exception (where its end can be reached).
+  try block completing without an exception (where its end can be reached). For a `finally`, each
+  way it can be entered: the try (or a catch clause) completing, leaving by `return`/`break`/
+  `continue`/`goto`, or an exception (from the try not caught there, or from a catch clause). A local
+  set along the way says which, so no handler is added (not in a try with `yield return`).
 - **Conditions**: each condition of each decision seen both true and false. A decision is a boolean
   expression with `&&`, `||`, `!`, and on bools `&`, `|`, `^`, `==`, `!=` and `?:` (as DO-178C counts
   them), the primitive patterns of an `is` with `and`/`or`/`not` (`x is > 0 and < 10` has two
@@ -68,9 +71,32 @@ For each C# project that isn't a test project, right before it compiles:
    per decision, the evaluations seen, the conditions shown, and a test for every missing value.
    `dotnet tarp mcdc-report` prints it again from `TestResults/tarp`.
 
-Options: `--tarp-results <dir>` (instead of `TestResults/tarp`), `--tarp-report <file>` (instead of the
-console), `--tarp-exception-exits` (count functions left by an exception, see above). In a project: `<TarpExclude>true</TarpExclude>` to leave it out; `[ExcludeFromCodeCoverage]`
-leaves out a member or type.
+Options: `--tarp-results <dir>` (instead of `TestResults/tarp`), `--tarp-exception-exits` (count
+functions left by an exception, see above), and the reports below. In a project:
+`<TarpExclude>true</TarpExclude>` to leave it out; `[ExcludeFromCodeCoverage]` leaves out a member
+or type.
+
+### Reports
+
+| Option | Format | For |
+|---|---|---|
+| `--tarp-report <file>` | text (the console without it) | reading |
+| `--tarp-lcov <file>` | lcov tracefile (`coverage.info`) | genhtml, Codecov, Coveralls, editors' coverage gutters, other lcov tools |
+| `--tarp-markdown <file>` | Markdown | a CI job summary (`$GITHUB_STEP_SUMMARY`) or a pull request comment |
+| `--tarp-html <file>` | one self-contained HTML page | browsing the source with counts, light and dark |
+
+Several can be given at once. `dotnet tarp mcdc-report -d TestResults/tarp` takes the same ones as
+`--report`, `--lcov`, `--markdown` and `--html`.
+
+The tracefile has lines with hit counts (`DA`), functions (`FN`, `FNDA`), branches (`BRDA`: each
+decision's true and false outcome, and the branch points above) and MC/DC (`MCDC`, lcov 2.x: a
+condition's sense is 1 when shown to affect the outcome), with full source paths. CI checks it with
+lcov 2.6: `genhtml --branch-coverage --mcdc-coverage coverage.info -o html`.
+
+The Markdown and HTML reports give, per file, what wasn't covered, and MC/DC per decision as tables:
+the evaluations recorded (`T`, `F`, `-` for not evaluated), then per condition whether it was shown
+true and false, and a test that would show what's missing. "no pair" is a condition of `^`, `==`,
+`!=` or `?:` shown both ways, but never in two evaluations with different outcomes.
 
 ### A single project, without a build
 

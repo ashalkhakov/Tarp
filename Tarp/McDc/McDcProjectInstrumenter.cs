@@ -68,6 +68,7 @@ public class McDcProjectInstrumenter
 
             var tree = await document.GetSyntaxTreeAsync(cts).ConfigureAwait(false);
             var model = compilation.GetSemanticModel(tree!);
+            map.Sources[relativePath.Replace('\\', '/')] = document.FilePath!;
             var rewriter = new CoverageRewriter(model, map, relativePath.Replace('\\', '/'));
             var root = (CompilationUnitSyntax)rewriter.Visit(await tree!.GetRootAsync(cts).ConfigureAwait(false))!;
 

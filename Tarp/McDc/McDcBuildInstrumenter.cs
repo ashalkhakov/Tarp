@@ -222,6 +222,7 @@ public class McDcBuildInstrumenter
         foreach (var (tree, _) in toInstrument)
         {
             var first = map.Decisions.Count;
+            map.Sources[DisplayPath(request, tree.FilePath)] = tree.FilePath;
             var rewriter = new CoverageRewriter(compilation.GetSemanticModel(tree), map, DisplayPath(request, tree.FilePath), excluded[tree.FilePath],
                 request.ExceptionExits);
             var root = (CompilationUnitSyntax)rewriter.Visit(tree.GetRoot())!;
