@@ -53,18 +53,23 @@ public static class T
         Throws(p, "Out", args).Should().BeOfType<ArgumentException>();
 
         var functions = p.Coverage().Functions.ToDictionary(f => f.Function.Name);
-        functions["T.Thrower(int)"].ExitsNotTaken.Should().NotContain("an exception", "its own throw leaves it");
-        functions["T.Caller(int)"].ExitsNotTaken.Should().NotContain("an exception", "Thrower's exception left it");
-        functions["T.Catches(int)"].ExitsNotTaken.Should().Contain("an exception", "it catches Thrower's exception");
-        functions["T.Later(int)"].ExitsNotTaken.Should().NotContain("an exception", "its task faulted");
-        functions["T.Out(int, out int)"].ExitsNotTaken.Should().NotContain("an exception");
-        functions["S.S(int)"].ExitsNotTaken.Should().NotContain("an exception");
+        functions["T.Thrower(int)"].LeftByException.Should().BeTrue("its own throw leaves it");
+        functions["T.Caller(int)"].LeftByException.Should().BeTrue("Thrower's exception left it");
+        functions["T.Catches(int)"].LeftByException.Should().BeFalse("it catches Thrower's exception");
+        functions["T.Later(int)"].LeftByException.Should().BeTrue("its task faulted");
+        functions["T.Out(int, out int)"].LeftByException.Should().BeTrue();
+        functions["S.S(int)"].LeftByException.Should().BeTrue();
+        // not a gap: the other exits are as without the option
+        functions["T.Catches(int)"].Exits.Should().Be(2);
+        functions["T.Catches(int)"].ExitsNotTaken.Should().BeEmpty("a return counts when it starts");
 
         // yield return can't be in a try block with a catch: iterators aren't wrapped
-        var iterate = functions["T.Iterate(int)"].Function;
-        iterate.Exits.Select(id => p.Map.Probes[id].Kind).Should().NotContain(ProbeEntry.ExceptionExit);
+        var iterate = functions["T.Iterate(int)"];
+        iterate.Function.Exits.Select(id => p.Map.Probes[id].Kind).Should().NotContain(ProbeEntry.ExceptionExit);
+        iterate.LeftByException.Should().BeNull();
 
-        McDcReport.Format(p.Map, p.Results(), p.Counts()).Should().Contain("T.Catches(int): exits not taken: an exception");
+        var report = McDcReport.Format(p.Map, p.Results(), p.Counts());
+        report.Should().NotContain("an exception\n").And.MatchRegex(@"Exceptions +\d+/\d+ .*not counted as gaps");
     }
 
     [TestMethod]

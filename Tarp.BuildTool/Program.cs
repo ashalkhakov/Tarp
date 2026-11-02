@@ -47,10 +47,15 @@ internal class Program
                 var markdown = cmd.Option("--tarp-markdown <FILE>", "Also write the report in Markdown", CommandOptionType.SingleValue);
                 var html = cmd.Option("--tarp-html <FILE>", "Also write the report as an HTML page, with the source", CommandOptionType.SingleValue);
                 var exceptionExits = cmd.Option("--tarp-exception-exits", "Also count functions left by an exception (wraps each function body in an exception filter)", CommandOptionType.NoValue);
+                var failLines = cmd.Option("--tarp-fail-under-lines <PERCENT>", "Fail when line coverage is below this", CommandOptionType.SingleValue);
+                var failBranches = cmd.Option("--tarp-fail-under-branches <PERCENT>", "Fail when branch coverage is below this", CommandOptionType.SingleValue);
+                var failMcDc = cmd.Option("--tarp-fail-under-mcdc <PERCENT>", "Fail when MC/DC (conditions shown) is below this", CommandOptionType.SingleValue);
+                var exclusions = cmd.Option("--tarp-exclusions <FILE>", "Files and lines the fail-under checks leave out (path glob, or path:line, one a line)", CommandOptionType.SingleValue);
 
                 cmd.OnExecuteAsync((CancellationToken cts) =>
                     TestCommand.Run(results.Value() ?? TestCommand.DefaultResultsDirectory, cmd.RemainingArguments,
-                        new ReportFiles(report.Value(), lcov.Value(), cobertura.Value(), markdown.Value(), html.Value()), exceptionExits.HasValue(), cts));
+                        new ReportFiles(report.Value(), lcov.Value(), cobertura.Value(), markdown.Value(), html.Value()),
+                        GateOptions.Parse(failLines.Value(), failBranches.Value(), failMcDc.Value(), exclusions.Value()), exceptionExits.HasValue(), cts));
             });
 
             app.Command("mcdc-report", cmd =>
@@ -65,10 +70,18 @@ internal class Program
                 var cobertura = cmd.Option("--cobertura <FILE>", "Also write a Cobertura XML report (lines, branches)", CommandOptionType.SingleValue);
                 var markdown = cmd.Option("--markdown <FILE>", "Also write the report in Markdown", CommandOptionType.SingleValue);
                 var html = cmd.Option("--html <FILE>", "Also write the report as an HTML page, with the source", CommandOptionType.SingleValue);
+                var failLines = cmd.Option("--fail-under-lines <PERCENT>", "Fail when line coverage is below this", CommandOptionType.SingleValue);
+                var failBranches = cmd.Option("--fail-under-branches <PERCENT>", "Fail when branch coverage is below this", CommandOptionType.SingleValue);
+                var failMcDc = cmd.Option("--fail-under-mcdc <PERCENT>", "Fail when MC/DC (conditions shown) is below this", CommandOptionType.SingleValue);
+                var exclusions = cmd.Option("--exclusions <FILE>", "Files and lines the fail-under checks leave out (path glob, or path:line, one a line)", CommandOptionType.SingleValue);
 
                 cmd.OnExecute(() =>
-                    new ReportFiles(report.Value(), lcov.Value(), cobertura.Value(), markdown.Value(), html.Value())
-                        .Write(McDcReport.AnalyzeDirectory(directory.Value() ?? TestCommand.DefaultResultsDirectory, hits.Value())));
+                {
+                    var gate = GateOptions.Parse(failLines.Value(), failBranches.Value(), failMcDc.Value(), exclusions.Value());
+                    var modules = McDcReport.AnalyzeDirectory(directory.Value() ?? TestCommand.DefaultResultsDirectory, hits.Value());
+                    new ReportFiles(report.Value(), lcov.Value(), cobertura.Value(), markdown.Value(), html.Value()).Write(modules);
+                    return gate.Check(modules) ? 0 : 1;
+                });
             });
 
             // called by Tarp.targets during a build

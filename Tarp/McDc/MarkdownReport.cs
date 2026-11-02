@@ -29,7 +29,12 @@ public static class MarkdownReport
         Row(sb, "Lines", all.Sum(f => f.LinesRun.Count), all.Sum(f => f.Lines.Count), "");
         Row(sb, "Branches", all.Sum(f => f.BranchesTaken), all.Sum(f => f.Branches), "decision outcomes, switch sections and arms, ??, ?., foreach, catch, finally");
         Row(sb, "Functions", all.Sum(f => f.Functions.Count(x => x.Entered)), all.Sum(f => f.Functions.Count),
-            Invariant($"entered; exits {all.Sum(f => f.Functions.Sum(x => x.ExitsTaken))}/{all.Sum(f => f.Functions.Sum(x => x.Function.Exits.Count))}"));
+            Invariant($"entered; exits {all.Sum(f => f.Functions.Sum(x => x.ExitsTaken))}/{all.Sum(f => f.Functions.Sum(x => x.Exits))}"));
+        if (all.Any(f => f.Functions.Any(x => x.LeftByException != null)))
+        {
+            Row(sb, "Exceptions", all.Sum(f => f.Functions.Count(x => x.LeftByException == true)), all.Sum(f => f.Functions.Count(x => x.LeftByException != null)),
+                McDcReport.ExceptionsNote);
+        }
         Row(sb, "Conditions", conditions.Count(c => c.SeenTrue && c.SeenFalse), conditions.Count, "seen both true and false");
         Row(sb, "MC/DC", conditions.Count(c => c.Covered), conditions.Count, "conditions shown to affect their decision (masking)");
         Line();

@@ -16,6 +16,8 @@ From one run of your tests, in source terms (what you wrote, not the compiled IL
   end of the body when it can be reached. With `--tarp-exception-exits` (or the MSBuild property
   `TarpExceptionExits=true`), also whether an exception left the function: each body gets an exception
   filter that records it and catches nothing, so exceptions and their stack traces are as they were.
+  The reports count these apart, as "Exceptions" (functions an exception left, of those wrapped), and
+  don't list a function that no exception left as a gap: in most tests, most functions return.
   It's opt-in because a method with a handler is often not inlined, which can slow hot code down, and
   a debugger may stop differently; iterators aren't wrapped (`yield return` can't be in such a try). Methods, constructors, accessors, operators, local
   functions and top-level statements count; lambdas don't (their statements are still lines).
@@ -31,7 +33,9 @@ From one run of your tests, in source terms (what you wrote, not the compiled IL
   expression with `&&`, `||`, `!`, and on bools `&`, `|`, `^`, `==`, `!=` and `?:` (as DO-178C counts
   them), the primitive patterns of an `is` with `and`/`or`/`not` (`x is > 0 and < 10` has two
   conditions), and the case labels of a `switch` section with several (`case 1: case 2:` is a decision,
-  "this section is taken", with two conditions; not in a switch with `goto case`).
+  "this section is taken", with two conditions; not in a switch with `goto case`). A side of `&&`
+  that's always true, `x is var y` (or `var _`), isn't a condition: it can never be false. A decision
+  that's only such sides isn't instrumented.
 - **MC/DC**: each condition shown to independently affect its decision's outcome (masking MC/DC).
 
 ## MC/DC
@@ -72,7 +76,7 @@ For each C# project that isn't a test project, right before it compiles:
    `dotnet tarp mcdc-report` prints it again from `TestResults/tarp`.
 
 Options: `--tarp-results <dir>` (instead of `TestResults/tarp`), `--tarp-exception-exits` (count
-functions left by an exception, see above), and the reports below. In a project:
+functions left by an exception, see above), the reports and the gate below. In a project:
 `<TarpExclude>true</TarpExclude>` to leave it out; `[ExcludeFromCodeCoverage]` leaves out a member
 or type.
 
@@ -104,6 +108,25 @@ the evaluations recorded (`T`, `F`, `-` for not evaluated), then per condition w
 true and false, and a test that would show what's missing. "no pair" is a condition of `^`, `==`,
 `!=` or `?:` shown both ways, but never in two evaluations with different outcomes.
 
+### Coverage gate
+
+`--tarp-fail-under-lines <percent>`, `--tarp-fail-under-branches <percent>` and
+`--tarp-fail-under-mcdc <percent>` make `dotnet tarp test` fail (exit code 1, after writing the
+reports) when the coverage is below the minimum; failing tests fail it as before. MC/DC is the share
+of conditions shown, as in the summary. `--tarp-exclusions <file>` leaves known gaps out of the gate
+(not out of the reports), one a line, with paths as the reports name the files:
+
+```
+# generated, tested elsewhere
+Shop.Core/Generated/**/*.cs
+# a defensive check that can't fail: everything on line 68 (its lines, decisions, branch points)
+Shop.Core/Orders.cs:68
+```
+
+`*` matches within a directory, `**` across directories. The gate prints its numbers, and the
+exclusions that matched nothing (stale ones, once the code has changed). `dotnet tarp mcdc-report`
+takes the same options without `tarp-`: `--fail-under-mcdc 95 --exclusions exclusions.txt`.
+
 ### In Azure DevOps
 
 `dotnet tarp test` takes `dotnet test`'s arguments, so the test results can be published as well:
@@ -119,6 +142,7 @@ steps:
     --tarp-cobertura $(Agent.TempDirectory)/coverage/cobertura.xml
     --tarp-markdown $(Agent.TempDirectory)/coverage/coverage.md
     --tarp-html $(Agent.TempDirectory)/coverage/index.html
+    --tarp-fail-under-mcdc 95 --tarp-exclusions coverage-exclusions.txt
   displayName: Test with coverage
 - task: PublishTestResults@2
   condition: succeededOrFailed()
@@ -137,7 +161,8 @@ steps:
   condition: succeededOrFailed()
 ```
 
-Tarp makes the reports' directories. On the pipeline run:
+Tarp makes the reports' directories; the gate fails the step, and the steps after it publish the
+results anyway. On the pipeline run:
 
 - **Tests** tab: the test results, from the `.trx` files.
 - **Code Coverage** tab: lines and branches per folder and file, from the Cobertura report, down to

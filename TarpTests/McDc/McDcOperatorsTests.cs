@@ -49,6 +49,10 @@ public static class T
     public static bool NotEither(int x) => x is not (1 or 2);
     public static bool InDecision(int x, bool b) => b && x is >= 0 and <= 5;
     public static bool Generic<TIn>(TIn v) => v is string and { Length: > 0 };
+
+    public static bool Bound(int x) => x * 2 is var y && y > 4 && y < 10;
+    public static bool BoundLast(bool a, int x) => a && x is var _;
+    public static int OnlyBound(int x) { if (x is var y) return y; return 0; }
 }";
 
     private static void AllInputs(McDcEndToEndTests.Program p, string method, int n)
@@ -165,5 +169,30 @@ public static class T
 
         // a type parameter input narrows through object: it compiles (Build checks)
         p.Map.Decisions.Should().Contain(d => d.Text == "v is string and { Length: > 0 }");
+    }
+
+    // x is var y is always true: it can't be shown false, so it's evaluated but isn't a condition
+    [TestMethod]
+    public void AlwaysTrueIsNotACondition()
+    {
+        var p = McDcEndToEndTests.Build(Source);
+        foreach (var x in new[] { 1, 3, 9 })
+        {
+            p.Check("Bound", x);
+        }
+        p.Check("BoundLast", true, 1);
+        p.Check("BoundLast", false, 1);
+        p.Check("OnlyBound", 4);
+
+        var bound = p.Result("x * 2 is var y && y > 4 && y < 10");
+        bound.Decision.Shape.Should().Be("(c0) && (c1)");
+        bound.Decision.Conditions.Should().Equal("y > 4", "y < 10");
+        ShouldBeCovered(bound);
+
+        var last = p.Result("a && x is var _");
+        last.Decision.Conditions.Should().Equal("a");
+        ShouldBeCovered(last);
+
+        p.Map.Skipped.Should().ContainSingle(s => s.Text == "x is var y").Which.Reason.Should().Be("always true");
     }
 }

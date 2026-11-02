@@ -7,9 +7,13 @@ public class FunctionCoverage
 {
     public FunctionEntry Function { get; init; } = new();
     public bool Entered { get; init; }
+    // return/throw statements and the end: how many, how many taken, and those never taken ("line 12")
+    public int Exits { get; init; }
     public int ExitsTaken { get; init; }
-    // the exits that were never taken: "line 12", or "an exception" (the exception exits option)
     public List<string> ExitsNotTaken { get; init; } = new();
+    // whether an exception left it (the exception exits option; null without it, and for iterators): a
+    // metric of its own, not a gap, as most functions are never left by one in tests
+    public bool? LeftByException { get; init; }
     // its lines (not those of local functions in it), and those of them that ran
     public HashSet<int> Lines { get; init; } = new();
     public HashSet<int> LinesRun { get; init; } = new();
@@ -27,7 +31,8 @@ public class SwitchCoverage
  * The coverage of one file of one module, from the probes that ran and the decisions' evaluations:
  * - lines: a line was run if a probe covering it ran (statements, empty blocks)
  * - branches: each decision's two outcomes, and each switch section (with "no case matched")
- * - functions: entered when their entry probe ran; exits are return/throw statements and the end
+ * - functions: entered when their entry probe ran; exits are return/throw statements and the end, and
+ *   apart from them, whether an exception left the function
  */
 public class FileCoverage
 {
@@ -80,7 +85,8 @@ public class FileCoverage
             .ToDictionary(g => g.Key, g => g.SelectMany(p => Enumerable.Range(p.Line, p.EndLine - p.Line + 1)).ToHashSet());
         foreach (var function in map.Functions)
         {
-            var exits = function.Exits.Select(id => map.Probes[id]).ToList();
+            var exits = function.Exits.Select(id => map.Probes[id]).Where(p => p.Kind != ProbeEntry.ExceptionExit).ToList();
+            var exception = function.Exits.Select(id => map.Probes[id]).FirstOrDefault(p => p.Kind == ProbeEntry.ExceptionExit);
             var file = For(function.File);
             var lines = functionLines.TryGetValue(function.Id, out var l) ? l : new HashSet<int>();
             file.Functions.Add(new FunctionCoverage
@@ -89,10 +95,10 @@ public class FileCoverage
                 LinesRun = lines.Where(file.LinesRun.Contains).ToHashSet(),
                 Function = function,
                 Entered = function.Entry >= 0 && ran.Contains(function.Entry),
+                Exits = exits.Count,
                 ExitsTaken = exits.Count(p => ran.Contains(p.Id)),
-                ExitsNotTaken = exits.Where(p => !ran.Contains(p.Id))
-                    .Select(p => p.Kind == ProbeEntry.ExceptionExit ? "an exception" : $"line {p.Line}")
-                    .ToList()
+                ExitsNotTaken = exits.Where(p => !ran.Contains(p.Id)).Select(p => $"line {p.Line}").ToList(),
+                LeftByException = exception == null ? null : ran.Contains(exception.Id)
             });
         }
 
