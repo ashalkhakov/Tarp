@@ -6,23 +6,32 @@ Tarp is a test coverage measurement tool for C#.
 
 From one run of your tests, in source terms (what you wrote, not the compiled IL):
 
-- **Lines**: a probe runs right before each statement, and a statement's lines count as run once it
-  has started, so a call that throws doesn't make the lines after it look run. A compound statement's
+- **Lines**: a probe runs right before each statement, and counts how many times; a statement's lines
+  count as run once it has started, so a call that throws doesn't make the lines after it look run. A compound statement's
   probe covers its header (`if (...)`, `switch (...)`); its body has probes of its own. So do the
   condition of a `do ... while`, lambda bodies, switch expression arms, and field and property
   initializers: a line belongs to the innermost probe around it, so a lambda or an arm that never ran
   shows as not run even when the statement around it did.
 - **Functions**: entered or not, and which exits were taken: `return` and `throw` statements, and the
-  end of the body when it can be reached. Methods, constructors, accessors, operators, local
+  end of the body when it can be reached. With `--tarp-exception-exits` (or the MSBuild property
+  `TarpExceptionExits=true`), also whether an exception left the function: each body gets an exception
+  filter that records it and catches nothing, so exceptions and their stack traces are as they were.
+  It's opt-in because a method with a handler is often not inlined, which can slow hot code down, and
+  a debugger may stop differently; iterators aren't wrapped (`yield return` can't be in such a try). Methods, constructors, accessors, operators, local
   functions and top-level statements count; lambdas don't (their statements are still lines).
 - **Branches**: both outcomes of every decision (including `when` guards and `catch` filters), every
-  `switch` section (including "no case matched" for a switch without a `default`), every switch
-  expression arm, both sides of `??`, null and not null for `?.` and `?[]`, and whether a `foreach`
-  iterated at all.
+  `switch` section (including "no case matched" for a switch without a `default`, when some value can
+  match none), every switch expression arm, both sides of `??`, null and not null for `?.` and `?[]`,
+  whether a `foreach` iterated at all, and for a `try` with `catch` clauses: each catch clause, and the
+  try block completing without an exception (where its end can be reached). For a `finally`, each
+  way it can be entered: the try (or a catch clause) completing, leaving by `return`/`break`/
+  `continue`/`goto`, or an exception (from the try not caught there, or from a catch clause). A local
+  set along the way says which, so no handler is added (not in a try with `yield return`).
 - **Conditions**: each condition of each decision seen both true and false. A decision is a boolean
   expression with `&&`, `||`, `!`, and on bools `&`, `|`, `^`, `==`, `!=` and `?:` (as DO-178C counts
-  them), and the primitive patterns of an `is` with `and`/`or`/`not` (`x is > 0 and < 10` has two
-  conditions).
+  them), the primitive patterns of an `is` with `and`/`or`/`not` (`x is > 0 and < 10` has two
+  conditions), and the case labels of a `switch` section with several (`case 1: case 2:` is a decision,
+  "this section is taken", with two conditions; not in a switch with `goto case`).
 - **MC/DC**: each condition shown to independently affect its decision's outcome (masking MC/DC).
 
 ## MC/DC
@@ -62,9 +71,82 @@ For each C# project that isn't a test project, right before it compiles:
    per decision, the evaluations seen, the conditions shown, and a test for every missing value.
    `dotnet tarp mcdc-report` prints it again from `TestResults/tarp`.
 
-Options: `--tarp-results <dir>` (instead of `TestResults/tarp`), `--tarp-report <file>` (instead of the
-console). In a project: `<TarpExclude>true</TarpExclude>` to leave it out; `[ExcludeFromCodeCoverage]`
-leaves out a member or type.
+Options: `--tarp-results <dir>` (instead of `TestResults/tarp`), `--tarp-exception-exits` (count
+functions left by an exception, see above), and the reports below. In a project:
+`<TarpExclude>true</TarpExclude>` to leave it out; `[ExcludeFromCodeCoverage]` leaves out a member
+or type.
+
+### Reports
+
+| Option | Format | For |
+|---|---|---|
+| `--tarp-report <file>` | text (the console without it) | reading |
+| `--tarp-lcov <file>` | lcov tracefile (`coverage.info`) | genhtml, Codecov, Coveralls, editors' coverage gutters, other lcov tools |
+| `--tarp-cobertura <file>` | Cobertura XML | Azure DevOps' Code Coverage tab, GitLab merge requests, Jenkins, Codecov, ReportGenerator |
+| `--tarp-markdown <file>` | Markdown | a CI job summary (`$GITHUB_STEP_SUMMARY`) or a pull request comment |
+| `--tarp-html <file>` | one self-contained HTML page | browsing the source with counts, light and dark |
+
+Several can be given at once. `dotnet tarp mcdc-report -d TestResults/tarp` takes the same ones as
+`--report`, `--lcov`, `--cobertura`, `--markdown` and `--html`.
+
+The tracefile has lines with hit counts (`DA`), functions (`FN`, `FNDA`), branches (`BRDA`: each
+decision's true and false outcome, and the branch points above) and MC/DC (`MCDC`, lcov 2.x: a
+condition's sense is 1 when shown to affect the outcome), with full source paths. CI checks it with
+lcov 2.6: `genhtml --branch-coverage --mcdc-coverage coverage.info -o html`.
+
+The Cobertura report has lines with hit counts and, per line, its branches taken (`condition-coverage`,
+counted as in the tracefile), with one package per assembly, one class per source file, and a method
+per function with its own lines and branches (a local function's lines are its own, a lambda's belong
+to the function around it). Cobertura has no MC/DC.
+
+The Markdown and HTML reports give, per file, what wasn't covered, and MC/DC per decision as tables:
+the evaluations recorded (`T`, `F`, `-` for not evaluated), then per condition whether it was shown
+true and false, and a test that would show what's missing. "no pair" is a condition of `^`, `==`,
+`!=` or `?:` shown both ways, but never in two evaluations with different outcomes.
+
+### In Azure DevOps
+
+`dotnet tarp test` takes `dotnet test`'s arguments, so the test results can be published as well:
+
+```yaml
+steps:
+- task: UseDotNet@2
+  inputs:
+    version: 10.0.x
+- script: dotnet tool install -g dotnet-tarp
+- script: >
+    dotnet tarp test --logger trx --results-directory $(Agent.TempDirectory)/tests
+    --tarp-cobertura $(Agent.TempDirectory)/coverage/cobertura.xml
+    --tarp-markdown $(Agent.TempDirectory)/coverage/coverage.md
+    --tarp-html $(Agent.TempDirectory)/coverage/index.html
+  displayName: Test with coverage
+- task: PublishTestResults@2
+  condition: succeededOrFailed()
+  inputs:
+    testResultsFormat: VSTest
+    testResultsFiles: $(Agent.TempDirectory)/tests/*.trx
+- task: PublishCodeCoverageResults@2
+  condition: succeededOrFailed()
+  inputs:
+    summaryFileLocation: $(Agent.TempDirectory)/coverage/cobertura.xml
+- script: echo "##vso[task.uploadsummary]$(Agent.TempDirectory)/coverage/coverage.md"
+  condition: succeededOrFailed()
+  displayName: Coverage and MC/DC summary
+- publish: $(Agent.TempDirectory)/coverage
+  artifact: coverage
+  condition: succeededOrFailed()
+```
+
+Tarp makes the reports' directories. On the pipeline run:
+
+- **Tests** tab: the test results, from the `.trx` files.
+- **Code Coverage** tab: lines and branches per folder and file, from the Cobertura report, down to
+  a file's source where the agent's paths let Azure find it. Azure DevOps has no MC/DC view.
+- **Extensions** tab: the Markdown report: the summary (MC/DC included), the files, and per file what
+  wasn't covered, with each incomplete decision's MC/DC tables (the evaluations, then per condition
+  what's missing and a test that would show it). Azure renders it with its own Markdown, not the wiki's.
+- **Artifacts** (`coverage`): the HTML report, `index.html`; download it and open it for the source
+  with counts and every decision's MC/DC tables.
 
 ### A single project, without a build
 

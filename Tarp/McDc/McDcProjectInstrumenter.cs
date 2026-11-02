@@ -50,7 +50,7 @@ public class McDcProjectInstrumenter
         var compilation = await project.GetCompilationAsync(cts).ConfigureAwait(false)
             ?? throw new InvalidOperationException($"could not compile {projectFilePath}");
 
-        var map = new McDcMap { ModuleId = Guid.NewGuid().ToString("N") };
+        var map = new McDcMap { ModuleId = Guid.NewGuid().ToString("N"), Name = project.AssemblyName };
         var baseDir = fileSystem.Path.GetDirectoryName(project.FilePath)!;
 
         foreach (var document in project.Documents)
@@ -68,6 +68,7 @@ public class McDcProjectInstrumenter
 
             var tree = await document.GetSyntaxTreeAsync(cts).ConfigureAwait(false);
             var model = compilation.GetSemanticModel(tree!);
+            map.Sources[relativePath.Replace('\\', '/')] = document.FilePath!;
             var rewriter = new CoverageRewriter(model, map, relativePath.Replace('\\', '/'));
             var root = (CompilationUnitSyntax)rewriter.Visit(await tree!.GetRootAsync(cts).ConfigureAwait(false))!;
 

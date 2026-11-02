@@ -8,14 +8,52 @@ using System.Text;
 namespace Tarp.McDc;
 
 // one instrumented assembly: what was instrumented, and what ran
-public record ModuleResult(McDcMap Map, List<DecisionResult> Decisions, IReadOnlySet<int> Probes);
+public record ModuleResult(McDcMap Map, List<DecisionResult> Decisions, IReadOnlyDictionary<int, long> Counts)
+{
+    // the probes that ran
+    public IReadOnlySet<int> Probes { get; } = Counts.Where(c => c.Value > 0).Select(c => c.Key).ToHashSet();
+}
 
 public static class McDcReport
 {
-    public static List<DecisionResult> Analyze(McDcMap map, IEnumerable<McDcHit> hits)
+    // probes: the ones that ran, for the decisions over case labels (see CaseLabelHits)
+    public static List<DecisionResult> Analyze(McDcMap map, IEnumerable<McDcHit> hits, IReadOnlySet<int>? probes = null)
     {
-        var all = hits.ToList();
+        var all = hits.Concat(CaseLabelHits(map, probes ?? new HashSet<int>())).ToList();
         return map.Decisions.Select(d => McDcAnalyzer.Analyze(d, all)).ToList();
+    }
+
+    /*
+     * The evaluations of a switch section's labels, from which label matched. As the chain
+     * "if (labels of section 0) ... else if (labels of section 1) ...": when a label in section t matched,
+     * the sections before t were evaluated and false, section t's labels up to that one were evaluated
+     * (that one true), and the sections after t weren't evaluated; when no case matched, all were false.
+     */
+    private static IEnumerable<McDcHit> CaseLabelHits(McDcMap map, IReadOnlySet<int> ran)
+    {
+        foreach (var d in map.Decisions.Where(d => d.SwitchId != null))
+        {
+            var sw = map.Switches[d.SwitchId!.Value];
+            var s = d.SwitchSection!.Value;
+            var all = (1u << sw.LabelProbes[s].Count) - 1;
+            for (var t = s; t < sw.LabelProbes.Count; t++)
+            {
+                for (var j = 0; j < sw.LabelProbes[t].Count; j++)
+                {
+                    if (!ran.Contains(sw.LabelProbes[t][j]))
+                    {
+                        continue;
+                    }
+                    yield return t == s
+                        ? new McDcHit(d.Id, (1u << (j + 1)) - 1, 1u << j, true)
+                        : new McDcHit(d.Id, all, 0, false);
+                }
+            }
+            if (sw.NoMatchProbe >= 0 && ran.Contains(sw.NoMatchProbe))
+            {
+                yield return new McDcHit(d.Id, all, 0, false);
+            }
+        }
     }
 
     /*
@@ -34,15 +72,17 @@ public static class McDcReport
             .ToList();
 
         return maps
-            .Select(m => new ModuleResult(
-                m,
-                Analyze(m, hitFiles.SelectMany(f => McDcHits.Parse(f, m.ModuleId)).Distinct()),
-                hitFiles.SelectMany(f => McDcHits.ParseProbes(f, m.ModuleId)).ToHashSet()))
+            .Select(m =>
+            {
+                var counts = McDcHits.Sum(hitFiles.SelectMany(f => McDcHits.ParseProbes(f, m.ModuleId)));
+                var ran = counts.Where(c => c.Value > 0).Select(c => c.Key).ToHashSet();
+                return new ModuleResult(m, Analyze(m, hitFiles.SelectMany(f => McDcHits.Parse(f, m.ModuleId)).Distinct(), ran), counts);
+            })
             .ToList();
     }
 
-    public static string Format(McDcMap map, IReadOnlyList<DecisionResult> results, IReadOnlySet<int>? probes = null) =>
-        Format(new List<ModuleResult> { new(map, results.ToList(), probes ?? new HashSet<int>()) });
+    public static string Format(McDcMap map, IReadOnlyList<DecisionResult> results, IReadOnlyDictionary<int, long>? counts = null) =>
+        Format(new List<ModuleResult> { new(map, results.ToList(), counts ?? new Dictionary<int, long>()) });
 
     public static string Format(IReadOnlyList<ModuleResult> modules)
     {
@@ -104,7 +144,7 @@ public static class McDcReport
 
         sb.AppendLine("Summary");
         sb.AppendLine(Row("Lines", lines, ""));
-        sb.AppendLine(Row("Branches", branches, "decision outcomes, switch sections and arms, ??, ?., foreach"));
+        sb.AppendLine(Row("Branches", branches, "decision outcomes, switch sections and arms, ??, ?., foreach, catch, finally"));
         sb.AppendLine(Row("Functions", functions, $"entered; exits {exits.Item1}/{exits.Item2}"));
         sb.AppendLine(Row("Conditions", seen, "seen both true and false"));
         sb.AppendLine(Row("MC/DC", mcdc, "conditions shown to affect their decision"));
@@ -130,6 +170,20 @@ public static class McDcReport
             sb.AppendLine(CultureInfo.InvariantCulture, $"  lines not run: {Ranges(notRun)}");
         }
 
+        // the hot spots: lines run more than once, most first
+        var counts = parts.SelectMany(p => p.LineCounts)
+            .GroupBy(c => c.Key)
+            .Select(g => (Line: g.Key, Count: g.Sum(c => c.Value)))
+            .Where(c => c.Count > 1)
+            .OrderByDescending(c => c.Count).ThenBy(c => c.Line)
+            .Take(3)
+            .ToList();
+        if (counts.Count > 0)
+        {
+            sb.AppendLine(CultureInfo.InvariantCulture,
+                $"  most run: {string.Join(", ", counts.Select(c => string.Format(CultureInfo.InvariantCulture, "line {0} ({1:N0} times)", c.Line, c.Count)))}");
+        }
+
         foreach (var f in parts.SelectMany(p => p.Functions).OrderBy(f => f.Function.Line))
         {
             if (!f.Entered)
@@ -138,7 +192,7 @@ public static class McDcReport
             }
             else if (f.ExitsNotTaken.Count > 0)
             {
-                sb.AppendLine(CultureInfo.InvariantCulture, $"  {f.Function.Name}: exits not taken at line {string.Join(", ", f.ExitsNotTaken)}");
+                sb.AppendLine(CultureInfo.InvariantCulture, $"  {f.Function.Name}: exits not taken: {string.Join(", ", f.ExitsNotTaken)}");
             }
         }
 
@@ -150,7 +204,8 @@ public static class McDcReport
                 {
                     SwitchEntry.Expression => "arms",
                     SwitchEntry.Coalesce => "sides",
-                    SwitchEntry.ConditionalAccess or SwitchEntry.ForEach => "branches",
+                    SwitchEntry.ConditionalAccess or SwitchEntry.ForEach or SwitchEntry.Try => "branches",
+                    SwitchEntry.Finally => "ways in",
                     _ => "sections"
                 };
                 sb.AppendLine(CultureInfo.InvariantCulture, $"  {s.Switch.Kind} at line {s.Switch.Line}: {what} not taken: {string.Join("; ", s.NotTaken)}");
@@ -167,7 +222,7 @@ public static class McDcReport
     }
 
     // 3, 4, 5, 9 -> "3-5, 9"
-    private static string Ranges(List<int> sorted)
+    internal static string Ranges(List<int> sorted)
     {
         var parts = new List<string>();
         for (var i = 0; i < sorted.Count;)
@@ -183,7 +238,7 @@ public static class McDcReport
         return string.Join(", ", parts);
     }
 
-    private static void FormatDecision(StringBuilder sb, DecisionResult r)
+    internal static void FormatDecision(StringBuilder sb, DecisionResult r)
     {
         var d = r.Decision;
         sb.AppendLine(CultureInfo.InvariantCulture, $"{d.File}:{d.Line}:{d.Column}  {OneLine(d.Text)}");
@@ -245,6 +300,6 @@ public static class McDcReport
         return s.PadRight(width);
     }
 
-    private static string OneLine(string text) =>
+    internal static string OneLine(string text) =>
         string.Join(" ", text.Split(new[] { '\r', '\n', '\t', ' ' }, StringSplitOptions.RemoveEmptyEntries));
 }

@@ -56,5 +56,13 @@ jobs:
           dotnet-version: |
             8.0.x
             10.0.x
+      # lcov 2.6 (Ubuntu's is older, without MC/DC), to check that it reads Tarp's tracefile
+      - name: Install lcov
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcapture-tiny-perl libdatetime-perl libdevel-stacktrace-perl libjson-xs-perl libtimedate-perl
+          git clone --depth 1 --branch v2.6 https://github.com/linux-test-project/lcov "$RUNNER_TEMP/lcov"
+          echo "GENHTML=$RUNNER_TEMP/lcov/bin/genhtml" >> "$GITHUB_ENV"
       - run: bash samples/e2e.sh
         shell: bash

@@ -11,8 +11,8 @@ namespace TarpGen
         private const string ModuleId = "__TARP_MODULE_ID__";
         private const string DefaultHitsDirectory = @"__TARP_HITS_DIR__";
 
-        // line coverage: one flag per probe (see Tarp.McDc.CoverageRewriter)
-        private static readonly bool[] _probes = new bool[__TARP_PROBE_COUNT__];
+        // line coverage: how many times each probe ran (see Tarp.McDc.CoverageRewriter)
+        private static readonly long[] _probes = new long[__TARP_PROBE_COUNT__];
 
         /*
          * One evaluation of a decision in progress. It is a local of the instrumented code (declared
@@ -37,17 +37,13 @@ namespace TarpGen
         }
 
         /*
-         * Read before writing: after its first hit, a probe only reads, so a hot loop doesn't keep
-         * writing its cache line, and threads on other cores keep their copies of it (no false sharing).
-         * A bool per probe, not a bit: each probe's write is its own, so threads never lose each other's.
+         * Interlocked: threads hitting the same probe at once don't lose counts (a plain ++ would).
+         * A long: a hot loop can't overflow it.
          */
         [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
         private static void Hit(int id)
         {
-            if (!_probes[id])
-            {
-                _probes[id] = true;
-            }
+            System.Threading.Interlocked.Increment(ref _probes[id]);
         }
 
         // runs right before a statement
@@ -74,6 +70,21 @@ namespace TarpGen
         {
             Hit(id);
             return value;
+        }
+
+        // in an exception filter around a function's body (catch ... when (Escaped(id))): records that an
+        // exception left the function, and returns false, so that nothing is caught
+        public static bool Escaped(int id)
+        {
+            Hit(id);
+            return false;
+        }
+
+        // a finally, entered: state 0 1 2 from the try block, 10+k 20+k 30+k from catch k (see
+        // Tarp.McDc.CoverageRewriter.VisitTryStatement); its probes start at first, three per part
+        public static void Finally(int first, int state)
+        {
+            Hit(state < 10 ? first + state : first + 3 + 3 * (state % 10) + state / 10 - 1);
         }
 
         // a?.b: one probe for "not null", one for "null"
@@ -157,12 +168,14 @@ namespace TarpGen
         internal static string Snapshot()
         {
             var sb = new System.Text.StringBuilder();
-            sb.Append("tarp-mcdc 2 ").Append(ModuleId).Append('\n');
+            // format 3: "p <id> <count>" for every probe that ran
+            sb.Append("tarp-mcdc 3 ").Append(ModuleId).Append('\n');
             for (var i = 0; i < _probes.Length; i++)
             {
-                if (_probes[i])
+                var count = System.Threading.Interlocked.Read(ref _probes[i]);
+                if (count > 0)
                 {
-                    sb.Append("p ").Append(i).Append('\n');
+                    sb.Append("p ").Append(i).Append(' ').Append(count).Append('\n');
                 }
             }
             foreach (var key in _hits.Keys)
@@ -185,7 +198,7 @@ namespace TarpGen
                 {
                     dir = DefaultHitsDirectory;
                 }
-                if (string.IsNullOrEmpty(dir) || _hits.IsEmpty && System.Array.IndexOf(_probes, true) < 0)
+                if (string.IsNullOrEmpty(dir) || _hits.IsEmpty && System.Array.TrueForAll(_probes, c => c == 0))
                 {
                     return;
                 }

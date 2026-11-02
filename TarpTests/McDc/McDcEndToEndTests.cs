@@ -39,13 +39,13 @@ public class McDcEndToEndTests
                 .GetMethod("Snapshot", BindingFlags.Static | BindingFlags.NonPublic)!
                 .Invoke(null, null)!;
 
-        public IReadOnlySet<int> Probes() => McDcHits.ParseProbes(Snapshot(), Map.ModuleId).ToHashSet();
+        public Dictionary<int, long> Counts() => McDcHits.Sum(McDcHits.ParseProbes(Snapshot(), Map.ModuleId));
 
-        public FileCoverage Coverage() => FileCoverage.Of(new ModuleResult(Map, Results(), Probes())).Single();
+        public FileCoverage Coverage() => FileCoverage.Of(new ModuleResult(Map, Results(), Counts())).Single();
 
         public List<DecisionResult> Results()
         {
-            var results = McDcReport.Analyze(Map, McDcHits.Parse(Snapshot(), Map.ModuleId));
+            var results = McDcReport.Analyze(Map, McDcHits.Parse(Snapshot(), Map.ModuleId), Counts().Keys.ToHashSet());
             results.SelectMany(r => r.Inconsistent).Should().BeEmpty();
             return results;
         }
@@ -66,13 +66,13 @@ public class McDcEndToEndTests
         .Select(p => MetadataReference.CreateFromFile(p))
         .ToArray();
 
-    internal static Program Build(string source, OutputKind kind = OutputKind.DynamicallyLinkedLibrary)
+    internal static Program Build(string source, OutputKind kind = OutputKind.DynamicallyLinkedLibrary, bool exceptionExits = false)
     {
         var tree = CSharpSyntaxTree.ParseText(source, path: "T.cs");
         var compilation = Compile("Original", kind, tree);
 
         var map = new McDcMap { ModuleId = "test" };
-        var rewriter = new CoverageRewriter(compilation.GetSemanticModel(tree), map, "T.cs");
+        var rewriter = new CoverageRewriter(compilation.GetSemanticModel(tree), map, "T.cs", exceptionExits: exceptionExits);
         var root = McDcProjectInstrumenter.WithPrologue((CompilationUnitSyntax)rewriter.Visit(tree.GetRoot())!, "T.cs");
         var instrumentedSource = root.ToFullString();
 

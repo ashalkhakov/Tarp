@@ -42,12 +42,19 @@ public sealed class CoverageRewriter : DecisionRewriter
     // the function whose body is being visited; null in a lambda, whose returns aren't the function's exits
     private readonly Stack<FunctionEntry?> _functions = new();
     private readonly Stack<SwitchEntry> _switches = new();
+    // per function begun: how many probes, decisions and switches the map had then (see EndFunction)
+    private readonly Dictionary<FunctionEntry, (int Probes, int Decisions, int Switches)> _functionStarts = new();
     // the probe that runs first for an original statement (for a block: the first one in it)
     private readonly Dictionary<StatementSyntax, int> _firstProbe = new();
 
-    public CoverageRewriter(SemanticModel model, McDcMap map, string displayPath, IReadOnlyDictionary<int, string>? excluded = null)
+    // count functions left by an exception (an exception filter around each body: opt-in, see WithExceptionExit)
+    private readonly bool _exceptionExits;
+
+    public CoverageRewriter(SemanticModel model, McDcMap map, string displayPath, IReadOnlyDictionary<int, string>? excluded = null,
+        bool exceptionExits = false)
         : base(model, map, displayPath, excluded)
     {
+        _exceptionExits = exceptionExits;
     }
 
     // statements that aren't in a block: if (x) return; -> if (x) { P(id); return; }
@@ -58,7 +65,7 @@ public sealed class CoverageRewriter : DecisionRewriter
             result is StatementSyntax rewritten && ShouldProbe(original))
         {
             var probe = ProbeStatement(ProbeFor(original));
-            return Block(List(new[] { probe.WithTrailingTrivia(Space) }.Concat(WithForEachBranch(original, rewritten.WithoutTrivia()))))
+            return Block(List(new[] { probe.WithTrailingTrivia(Space) }.Concat(FinallyPathsOfJump(original)).Concat(WithForEachBranch(original, rewritten.WithoutTrivia()))))
                 .WithOpenBraceToken(Token(SyntaxKind.OpenBraceToken).WithLeadingTrivia(rewritten.GetLeadingTrivia()).WithTrailingTrivia(Space))
                 .WithCloseBraceToken(Token(SyntaxKind.CloseBraceToken).WithLeadingTrivia(Space).WithTrailingTrivia(rewritten.GetTrailingTrivia()));
         }
@@ -130,6 +137,7 @@ public sealed class CoverageRewriter : DecisionRewriter
             else
             {
                 result.Add(probe.WithLeadingTrivia(r.GetLeadingTrivia()).WithTrailingTrivia(Space));
+                result.AddRange(FinallyPathsOfJump(o));
                 result.AddRange(WithForEachBranch(o, r.WithLeadingTrivia()));
             }
         }
@@ -145,6 +153,16 @@ public sealed class CoverageRewriter : DecisionRewriter
      */
     private IEnumerable<StatementSyntax> WithForEachBranch(StatementSyntax original, StatementSyntax rewritten)
     {
+        // a try with a finally: the local that says how far it got (see VisitTryStatement)
+        if (original is TryStatementSyntax t && _finallyPaths.TryGetValue(t, out var paths))
+        {
+            return new[]
+            {
+                ParseStatement($"int __tarpPath{paths} = 0;").WithLeadingTrivia(rewritten.GetLeadingTrivia()).WithTrailingTrivia(Space),
+                rewritten.WithLeadingTrivia()
+            };
+        }
+
         if (original is not CommonForEachStatementSyntax loop || rewritten is not CommonForEachStatementSyntax r ||
             r.Statement is not BlockSyntax body || IsExcludedFromCoverage(original))
         {
@@ -256,18 +274,123 @@ public sealed class CoverageRewriter : DecisionRewriter
         var rewritten = (SwitchStatementSyntax)base.VisitSwitchStatement(node)!;
         _switches.Pop();
 
-        if (!node.Sections.Any(s => s.Labels.Any(l => l is DefaultSwitchLabelSyntax)))
+        var guarded = CanProbeLabels(node);
+        if (guarded)
         {
-            // no change to what the switch does: without a default, no match goes past the switch too
+            rewritten = ProbeLabels(node, rewritten, entry);
+        }
+
+        // without a default, no match goes past the switch: a default that does the same changes nothing.
+        // A switch that matches everything (switch (b) { case true: ... case false: ... }) has no such
+        // branch, and the end can't be reached: a default that breaks would change that, so none is added;
+        // with labels probed (guarded labels don't count for that), one that throws, which never runs
+        var hasDefault = node.Sections.Any(s => s.Labels.Any(l => l is DefaultSwitchLabelSyntax));
+        if (!hasDefault && SwitchEndIsReachable(node))
+        {
             var id = NewProbe(node, OwnSpan(node), ProbeEntry.NoCaseMatched);
-            var section = SwitchSection(
-                SingletonList<SwitchLabelSyntax>(DefaultSwitchLabel().WithTrailingTrivia(Space)),
-                List(new[] { ProbeStatement(id).WithTrailingTrivia(Space), ParseStatement("break;").WithTrailingTrivia(Space) }));
-            rewritten = rewritten.AddSections(section);
+            rewritten = rewritten.AddSections(DefaultSection(ProbeStatement(id), ParseStatement("break;")));
             entry.Labels.Add("no case matched");
             entry.Sections.Add(id);
+            entry.NoMatchProbe = id;
+        }
+        else if (!hasDefault && guarded)
+        {
+            rewritten = rewritten.AddSections(DefaultSection(ParseStatement("throw new global::System.InvalidOperationException(\"Tarp: no case matched\");")));
+        }
+        else if (hasDefault && guarded)
+        {
+            // a default section of its own (CanProbeLabels): entered only when no case matched
+            var defaultSection = node.Sections.First(s => s.Labels.Any(l => l is DefaultSwitchLabelSyntax));
+            var first = defaultSection.Statements.FirstOrDefault(_firstProbe.ContainsKey);
+            entry.NoMatchProbe = first != null ? _firstProbe[first] : -1;
         }
         return rewritten;
+    }
+
+    private static SwitchSectionSyntax DefaultSection(params StatementSyntax[] statements) =>
+        SwitchSection(
+            SingletonList<SwitchLabelSyntax>(DefaultSwitchLabel().WithTrailingTrivia(Space)),
+            List(statements.Select(s => s.WithTrailingTrivia(Space))));
+
+    private bool SwitchEndIsReachable(SwitchStatementSyntax node)
+    {
+        try
+        {
+            return Model.AnalyzeControlFlow(node)?.EndPointIsReachable ?? true;
+        }
+        catch (ArgumentException)
+        {
+            return true;
+        }
+    }
+
+    /*
+     * Case labels as conditions (MC/DC over case labels): each case label gets a probe in its when,
+     * run when the label matched. Not when the labels must stay as they are: goto case needs a
+     * "case c:" label, and a section with both default and case labels wouldn't tell "no case matched"
+     */
+    private bool CanProbeLabels(SwitchStatementSyntax node) =>
+        !node.DescendantNodes().OfType<GotoStatementSyntax>().Any(g => g.IsKind(SyntaxKind.GotoCaseStatement) &&
+            g.Ancestors().OfType<SwitchStatementSyntax>().FirstOrDefault() == node) &&
+        !node.Sections.Any(s => s.Labels.Any(l => l is DefaultSwitchLabelSyntax) && s.Labels.Count > 1) &&
+        !IsInExpressionTree(node);
+
+    // case c:  ->  case c when PT(id):     case p when g:  ->  case p when (g) && PT(id):
+    private SwitchStatementSyntax ProbeLabels(SwitchStatementSyntax original, SwitchStatementSyntax rewritten, SwitchEntry entry)
+    {
+        var sections = new List<SwitchSectionSyntax>();
+        for (var s = 0; s < original.Sections.Count; s++)
+        {
+            var o = original.Sections[s];
+            var r = rewritten.Sections[s];
+            var probes = new List<int>();
+            var labels = new List<SwitchLabelSyntax>();
+            for (var l = 0; l < o.Labels.Count; l++)
+            {
+                if (o.Labels[l] is DefaultSwitchLabelSyntax)
+                {
+                    labels.Add(r.Labels[l]);
+                    continue;
+                }
+                var id = NewProbe(o.Labels[l], o.Labels[l].Span, ProbeEntry.Branch);
+                probes.Add(id);
+                labels.Add(r.Labels[l] switch
+                {
+                    CaseSwitchLabelSyntax c => CasePatternSwitchLabel(
+                            c.Keyword, ConstantPattern(c.Value.WithoutTrailingTrivia()),
+                            WhenClause(ParseExpression($"{Runtime}.PT({id})")).WithWhenKeyword(Token(SyntaxKind.WhenKeyword).WithLeadingTrivia(Space).WithTrailingTrivia(Space)),
+                            c.ColonToken),
+                    CasePatternSwitchLabelSyntax { WhenClause: null } c => c
+                        .WithPattern(c.Pattern.WithoutTrailingTrivia())
+                        .WithWhenClause(WhenClause(ParseExpression($"{Runtime}.PT({id})")).WithWhenKeyword(Token(SyntaxKind.WhenKeyword).WithLeadingTrivia(Space).WithTrailingTrivia(Space))),
+                    CasePatternSwitchLabelSyntax c => c.WithWhenClause(c.WhenClause!.WithCondition(Probed($"__tarpValue && {Runtime}.PT({id})", c.WhenClause.Condition))),
+                    var other => other
+                });
+            }
+            entry.LabelProbes.Add(probes);
+            sections.Add(r.WithLabels(List(labels)));
+
+            // a section with several case labels: a decision, its labels the conditions
+            if (probes.Count > 1)
+            {
+                var lineSpan = o.GetLocation().GetLineSpan().StartLinePosition;
+                var texts = o.Labels.Where(x => x is not DefaultSwitchLabelSyntax).Select(x => x.ToString().Trim().TrimEnd(':').TrimEnd()).ToList();
+                Map.Decisions.Add(new DecisionEntry
+                {
+                    Id = Map.Decisions.Count,
+                    File = DisplayPath,
+                    Line = lineSpan.Line + 1,
+                    Column = lineSpan.Character + 1,
+                    SpanStart = o.SpanStart,
+                    Text = string.Join(" ", o.Labels.Select(x => x.ToString().Trim())),
+                    Shape = string.Join(" || ", texts.Select((_, i) => $"(c{i})")),
+                    Conditions = texts,
+                    SwitchId = entry.Id,
+                    SwitchSection = s
+                });
+            }
+        }
+        return rewritten.WithSections(List(sections));
     }
 
     public override SyntaxNode? VisitSwitchSection(SwitchSectionSyntax node)
@@ -287,6 +410,220 @@ public sealed class CoverageRewriter : DecisionRewriter
             entry.Sections.Add(first != null ? _firstProbe[first] : -1);
         }
         return rewritten.WithStatements(statements);
+    }
+
+    /*
+     * try with catches: each catch clause is a branch (its first statement ran), and so is "completed
+     * without an exception" (a probe after the try block's last statement) when that end can be reached.
+     * Not counted: which way a finally was entered, or a function left by an exception it didn't catch
+     * (both would need handlers of Tarp's own around the code: see issue #9).
+     */
+    public override SyntaxNode? VisitTryStatement(TryStatementSyntax node)
+    {
+        // the probes of the ways into the finally, before the body's: its jumps need them (FinallyPathsOfJump)
+        var withPaths = node.Finally != null && node.Catches.Count <= 9 && !IsExcludedFromCoverage(node) && !YieldsReturn(node.Block);
+        if (withPaths)
+        {
+            var first = Map.Probes.Count;
+            for (var i = 0; i < 3 + 3 * node.Catches.Count; i++)
+            {
+                NewProbe(node.Finally!, node.Finally!.FinallyKeyword.Span, ProbeEntry.Branch);
+            }
+            _finallyPaths[node] = first;
+        }
+
+        var rewritten = (TryStatementSyntax)base.VisitTryStatement(node)!;
+        if (withPaths)
+        {
+            rewritten = WithFinallyPaths(node, rewritten, _finallyPaths[node]);
+        }
+        if (node.Catches.Count == 0 || IsExcludedFromCoverage(node))
+        {
+            return rewritten;
+        }
+
+        var entry = new SwitchEntry { Id = Map.Switches.Count, File = DisplayPath, Line = Line(node), Kind = SwitchEntry.Try };
+        Map.Switches.Add(entry);
+
+        if (EndIsReachable(node.Block))
+        {
+            var id = NewProbe(node, node.Block.CloseBraceToken.Span, ProbeEntry.Branch);
+            entry.Labels.Add("completed without an exception");
+            entry.Sections.Add(id);
+            rewritten = rewritten.WithBlock(Append(rewritten.Block, ProbeStatement(id)));
+        }
+        foreach (var c in node.Catches)
+        {
+            entry.Labels.Add("catch" + (c.Declaration != null ? " " + c.Declaration : "") + (c.Filter != null ? " " + c.Filter : ""));
+            entry.Sections.Add(_firstProbe.TryGetValue(c.Block, out var first) ? first : -1);
+        }
+        return rewritten;
+    }
+
+    // try statements with a finally whose ways in are recorded: the first of their probes
+    private readonly Dictionary<TryStatementSyntax, int> _finallyPaths = new();
+
+    /*
+     * Which way a finally was entered: a local says how far the protected code got, and the finally
+     * records it when it starts (McDc.Finally). Nothing else changes:
+     *
+     *   int __tarpPath9 = 0;                      0: in the try block (an exception that isn't caught here)
+     *   try { ... __tarpPath9 = 1; }              1: the try block completed
+     *                                             2: a return, break, continue or goto out of the try block
+     *   catch (E) { __tarpPath9 = 10; ... __tarpPath9 = 20; }
+     *                                             10+k: in catch k (an exception from it), 20+k: completed,
+     *                                             30+k: a jump out of it
+     *   finally { McDc.Finally(9, __tarpPath9); ... }
+     *
+     * Only the ways in that can happen are branches: no "not caught here" with a catch-all, "an exception
+     * from catch k" only when it throws, "completed" only when the end can be reached. Not for a try
+     * block with yield return: stopping the enumeration runs the finally too.
+     */
+    private TryStatementSyntax WithFinallyPaths(TryStatementSyntax node, TryStatementSyntax rewritten, int first)
+    {
+        var path = "__tarpPath" + first;
+        StatementSyntax Set(int value) => ParseStatement($"{path} = {value};");
+
+        var entry = new SwitchEntry { Id = Map.Switches.Count, File = DisplayPath, Line = Line(node.Finally!), Kind = SwitchEntry.Finally };
+        Map.Switches.Add(entry);
+        void Way(int value, string label)
+        {
+            entry.Labels.Add(label);
+            entry.Sections.Add(value < 10 ? first + value : first + 3 + 3 * (value % 10) + value / 10 - 1);
+        }
+
+        if (!node.Catches.Any(c => c.Filter == null && (c.Declaration == null ||
+                Model.GetTypeInfo(c.Declaration.Type).Type?.ToDisplayString() == "System.Exception")))
+        {
+            Way(0, "an exception from the try block, not caught here");
+        }
+        if (EndIsReachable(node.Block))
+        {
+            Way(1, "the try block completed");
+            rewritten = rewritten.WithBlock(Append(rewritten.Block, Set(1)));
+        }
+        if (LeavingJumps(node.Block, node).Any())
+        {
+            Way(2, "a return, break, continue or goto out of the try block");
+        }
+
+        var catches = new List<CatchClauseSyntax>();
+        for (var k = 0; k < node.Catches.Count; k++)
+        {
+            var c = node.Catches[k];
+            var r = rewritten.Catches[k];
+            var name = "catch" + (c.Declaration != null ? " " + c.Declaration : "");
+            if (OutsideNestedFunctions(c.Block).Any(n => n is ThrowStatementSyntax or ThrowExpressionSyntax))
+            {
+                Way(10 + k, $"an exception from {name}");
+            }
+            var block = Prepend(r.Block, Set(10 + k));
+            if (EndIsReachable(c.Block))
+            {
+                Way(20 + k, $"{name} completed");
+                block = Append(block, Set(20 + k));
+            }
+            if (LeavingJumps(c.Block, node).Any())
+            {
+                Way(30 + k, $"a return, break, continue or goto out of {name}");
+            }
+            catches.Add(r.WithBlock(block));
+        }
+
+        var finallyBlock = Prepend(rewritten.Finally!.Block, ParseStatement($"{Runtime}.Finally({first}, {path});"));
+        return rewritten.WithCatches(List(catches)).WithFinally(rewritten.Finally.WithBlock(finallyBlock));
+    }
+
+    // before a jump out of try statements whose ways into their finally are recorded: where it jumps from
+    private IEnumerable<StatementSyntax> FinallyPathsOfJump(StatementSyntax jump)
+    {
+        if (jump is not (ReturnStatementSyntax or BreakStatementSyntax or ContinueStatementSyntax or GotoStatementSyntax) &&
+            !(jump is YieldStatementSyntax y && y.IsKind(SyntaxKind.YieldBreakStatement)))
+        {
+            yield break;
+        }
+        foreach (var t in jump.Ancestors().TakeWhile(a => a is not (AnonymousFunctionExpressionSyntax or LocalFunctionStatementSyntax or MemberDeclarationSyntax))
+                     .OfType<TryStatementSyntax>())
+        {
+            if (!_finallyPaths.TryGetValue(t, out var first) || !Leaves(jump, t))
+            {
+                continue;
+            }
+            var k = t.Catches.IndexOf(c => c.Block.Span.Contains(jump.Span));
+            if (t.Block.Span.Contains(jump.Span))
+            {
+                yield return ParseStatement($"__tarpPath{first} = 2;").WithTrailingTrivia(Space);
+            }
+            else if (k >= 0)
+            {
+                yield return ParseStatement($"__tarpPath{first} = {30 + k};").WithTrailingTrivia(Space);
+            }
+        }
+    }
+
+    private static IEnumerable<StatementSyntax> LeavingJumps(BlockSyntax block, TryStatementSyntax t) =>
+        OutsideNestedFunctions(block).OfType<StatementSyntax>()
+            .Where(s => s is ReturnStatementSyntax or BreakStatementSyntax or ContinueStatementSyntax or GotoStatementSyntax ||
+                        s is YieldStatementSyntax y && y.IsKind(SyntaxKind.YieldBreakStatement))
+            .Where(s => Leaves(s, t));
+
+    // a jump that goes past the try statement (so that its finally runs)
+    private static bool Leaves(StatementSyntax jump, TryStatementSyntax t)
+    {
+        switch (jump)
+        {
+            case ReturnStatementSyntax or YieldStatementSyntax:
+                return true;
+            case BreakStatementSyntax or ContinueStatementSyntax:
+                {
+                    // its loop (or, for break, switch) is around the try statement
+                    var target = jump.Ancestors().FirstOrDefault(a =>
+                        a is ForStatementSyntax or CommonForEachStatementSyntax or WhileStatementSyntax or DoStatementSyntax ||
+                        a is SwitchStatementSyntax && jump is BreakStatementSyntax);
+                    return target != null && target.Span.Contains(t.Span);
+                }
+            case GotoStatementSyntax g when g.IsKind(SyntaxKind.GotoStatement):
+                {
+                    var name = g.Expression?.ToString();
+                    var function = jump.Ancestors().FirstOrDefault(a => a is BaseMethodDeclarationSyntax or AccessorDeclarationSyntax or LocalFunctionStatementSyntax or AnonymousFunctionExpressionSyntax or CompilationUnitSyntax);
+                    var label = function?.DescendantNodes().OfType<LabeledStatementSyntax>().FirstOrDefault(l => l.Identifier.Text == name);
+                    return label != null && !t.Span.Contains(label.Span);
+                }
+            case GotoStatementSyntax:
+                {
+                    // goto case, goto default: its switch is around the try statement
+                    var target = jump.Ancestors().OfType<SwitchStatementSyntax>().FirstOrDefault();
+                    return target != null && target.Span.Contains(t.Span);
+                }
+            default:
+                return false;
+        }
+    }
+
+    private static bool YieldsReturn(BlockSyntax block) =>
+        OutsideNestedFunctions(block).OfType<YieldStatementSyntax>().Any(y => y.IsKind(SyntaxKind.YieldReturnStatement));
+
+    private static IEnumerable<SyntaxNode> OutsideNestedFunctions(SyntaxNode node) =>
+        node.DescendantNodes(n => n is not (AnonymousFunctionExpressionSyntax or LocalFunctionStatementSyntax));
+
+    // a statement at the start of a block, on the line of its {
+    private static BlockSyntax Prepend(BlockSyntax block, StatementSyntax statement)
+    {
+        if (block.Statements.Count == 0)
+        {
+            return block.WithStatements(SingletonList(statement.WithLeadingTrivia(Space).WithTrailingTrivia(Space)));
+        }
+        var first = block.Statements[0];
+        return block.WithStatements(block.Statements
+            .Replace(first, first.WithLeadingTrivia())
+            .Insert(0, statement.WithLeadingTrivia(first.GetLeadingTrivia()).WithTrailingTrivia(Space)));
+    }
+
+    // a statement at the end of a block, on the line of its }
+    private static BlockSyntax Append(BlockSyntax block, StatementSyntax statement)
+    {
+        var last = statement.WithLeadingTrivia(block.Statements.Count == 0 ? TriviaList(Space) : block.CloseBraceToken.LeadingTrivia).WithTrailingTrivia(Space);
+        return block.WithStatements(block.Statements.Add(last)).WithCloseBraceToken(block.CloseBraceToken.WithLeadingTrivia());
     }
 
     // lambdas: probes in block bodies, but not functions of their own
@@ -687,6 +1024,7 @@ public sealed class CoverageRewriter : DecisionRewriter
         var function = new FunctionEntry { Id = Map.Functions.Count, File = DisplayPath, Line = Line(first), Name = "<top-level statements>" };
         Map.Functions.Add(function);
         _functions.Push(function);
+        _functionStarts[function] = (Map.Probes.Count, Map.Decisions.Count, Map.Switches.Count);
 
         var r = (CompilationUnitSyntax)base.VisitCompilationUnit(node)!;
         var members = new List<MemberDeclarationSyntax>();
@@ -710,6 +1048,7 @@ public sealed class CoverageRewriter : DecisionRewriter
         }
 
         _functions.Pop();
+        EndFunction(function);
         return r.WithMembers(List(members));
     }
 
@@ -731,11 +1070,79 @@ public sealed class CoverageRewriter : DecisionRewriter
         };
         Map.Functions.Add(function);
         _functions.Push(function);
+        _functionStarts[function] = (Map.Probes.Count, Map.Decisions.Count, Map.Switches.Count);
         return true;
+    }
+
+    // what was added to the map since the function began is in it, unless a function nested in it (a
+    // local function, which ends first) has it already; lambdas aren't functions, so theirs is the function's
+    private void EndFunction(FunctionEntry function)
+    {
+        var (probes, decisions, switches) = _functionStarts[function];
+        _functionStarts.Remove(function);
+        foreach (var p in Map.Probes.Skip(probes).Where(p => p.Function < 0))
+        {
+            p.Function = function.Id;
+        }
+        foreach (var d in Map.Decisions.Skip(decisions).Where(d => d.Function < 0))
+        {
+            d.Function = function.Id;
+        }
+        foreach (var s in Map.Switches.Skip(switches).Where(s => s.Function < 0))
+        {
+            s.Function = function.Id;
+        }
     }
 
     // the function's body, with its entry and exits; ends the function begun with BeginFunction
     private BlockSyntax FunctionBody(
+        BlockSyntax? originalBody, ArrowExpressionClauseSyntax? originalArrow,
+        BlockSyntax? body, ArrowExpressionClauseSyntax? arrow, SyntaxToken semicolon, bool returnsValue, FunctionEntry function)
+    {
+        var block = ProbedBody(originalBody, originalArrow, body, arrow, semicolon, returnsValue, function);
+        if (_exceptionExits && !IsIterator(originalBody))
+        {
+            block = WithExceptionExit((SyntaxNode?)originalBody ?? originalArrow!, block, function);
+        }
+        EndFunction(function);
+        return block;
+    }
+
+    // yield return can't be in a try block with a catch clause
+    private static bool IsIterator(BlockSyntax? body) =>
+        body != null && body.DescendantNodes(n => n is not (AnonymousFunctionExpressionSyntax or LocalFunctionStatementSyntax))
+            .OfType<YieldStatementSyntax>().Any();
+
+    /*
+     * The exception exits option: an exception filter around the body records that an exception left the
+     * function, without catching it (the filter returns false):
+     *
+     *   { try { ... } catch (global::System.Exception) when (global::TarpGen.McDc.Escaped(7)) { throw; } }
+     *
+     * The filter runs while the runtime looks for a handler, before the stack unwinds, so the exception
+     * and its stack trace are as they were; exceptions the body catches itself never reach it. "throw;"
+     * never runs: it keeps the compiler's view of the body (no end reached through the catch, out
+     * parameters still assigned). Opt-in: a method with a handler is often not inlined by the JIT, and a
+     * debugger may stop differently. All on the body's first and last lines.
+     */
+    private BlockSyntax WithExceptionExit(SyntaxNode original, BlockSyntax body, FunctionEntry function)
+    {
+        var id = NewProbe(original, original.GetFirstToken().Span, ProbeEntry.ExceptionExit);
+        function.Exits.Add(id);
+
+        var guarded = (TryStatementSyntax)ParseStatement($"try {{ }} catch (global::System.Exception) when ({Runtime}.Escaped({id})) {{ throw; }}");
+        var inner = Block(body.Statements)
+            .WithOpenBraceToken(Token(SyntaxKind.OpenBraceToken).WithLeadingTrivia(Space).WithTrailingTrivia(body.OpenBraceToken.TrailingTrivia))
+            .WithCloseBraceToken(Token(SyntaxKind.CloseBraceToken).WithLeadingTrivia(body.CloseBraceToken.LeadingTrivia).WithTrailingTrivia(Space));
+        var statement = guarded.WithTryKeyword(guarded.TryKeyword.WithLeadingTrivia(Space).WithTrailingTrivia()).WithBlock(inner).WithTrailingTrivia(Space);
+
+        return body
+            .WithOpenBraceToken(body.OpenBraceToken.WithTrailingTrivia())
+            .WithStatements(SingletonList<StatementSyntax>(statement))
+            .WithCloseBraceToken(body.CloseBraceToken.WithLeadingTrivia());
+    }
+
+    private BlockSyntax ProbedBody(
         BlockSyntax? originalBody, ArrowExpressionClauseSyntax? originalArrow,
         BlockSyntax? body, ArrowExpressionClauseSyntax? arrow, SyntaxToken semicolon, bool returnsValue, FunctionEntry function)
     {

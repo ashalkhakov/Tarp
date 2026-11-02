@@ -13,6 +13,8 @@
     - TarpExclude: true in a project not to instrument it
     - TarpResultsDirectory: where maps and hits go (default: TestResults/tarp/ in the directory the build started in)
     - TarpToolPath: Tarp.BuildTool.dll (default: next to this file)
+    - TarpExceptionExits: true to also count functions left by an exception (an exception filter around
+      each body: see CoverageRewriter.WithExceptionExit)
   -->
   <PropertyGroup>
     <TarpToolPath Condition="'$(TarpToolPath)' == ''">$(MSBuildThisFileDirectory)Tarp.BuildTool.dll</TarpToolPath>
@@ -49,6 +51,7 @@
       <_TarpArg Include="lang-version=$(LangVersion)" />
       <_TarpArg Include="nullable=$(Nullable)" />
       <_TarpArg Include="allow-unsafe=$(AllowUnsafeBlocks)" />
+      <_TarpArg Include="exception-exits=$(TarpExceptionExits)" />
       <_TarpArg Include="@(_TarpDefine->'define=%(Identity)')" />
       <_TarpArg Include="@(ReferencePath->'reference=%(FullPath)')" />
       <_TarpArg Include="@(Analyzer->'analyzer=%(FullPath)')" />

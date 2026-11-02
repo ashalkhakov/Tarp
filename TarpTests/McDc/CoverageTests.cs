@@ -114,7 +114,7 @@ public class R
 
         var functions = c.Functions.ToDictionary(f => f.Function.Name);
         functions["T.Classify(int)"].Entered.Should().BeTrue();
-        functions["T.Classify(int)"].ExitsNotTaken.Should().Equal(LineOf("return 0;"), LineOf("return 2;"));
+        functions["T.Classify(int)"].ExitsNotTaken.Should().Equal($"line {LineOf("return 0;")}", $"line {LineOf("return 2;")}");
         functions["T.Expression(int)"].Entered.Should().BeTrue();
         functions["T.Never(int)"].Entered.Should().BeFalse();
         functions["T.Throws(bool)"].ExitsTaken.Should().Be(1);
