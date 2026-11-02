@@ -15,7 +15,7 @@ namespace Tarp.McDc;
  *                                          ? one character
  *   Shop.Core/Orders.cs:68                 everything on a line: its lines, its decisions' outcomes and
  *                                          conditions, its branch points
- *   Shop.Core/Orders.cs:68 day.Year == y   one condition of the decisions on a line (MC/DC only)
+ *   Shop.Core/Orders.cs:18 id.Length < 20  one condition of the decisions on a line (MC/DC only)
  *   Shop.Core/Orders.cs:68 [false]         one branch on a line (branches only): a decision's outcome,
  *                                          [true] or [false], or a branch point's way, as the text
  *                                          report names it after "not taken:" ([default:], [_],
