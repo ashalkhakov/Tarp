@@ -11,7 +11,7 @@ internal static class TestCommand
 {
     public const string DefaultResultsDirectory = "TestResults/tarp";
 
-    public static async Task<int> Run(string resultsDirectory, IReadOnlyList<string> testArguments, ReportFiles reports, bool exceptionExits, CancellationToken cts)
+    public static async Task<int> Run(string resultsDirectory, IReadOnlyList<string> testArguments, ReportFiles reports, GateOptions gate, bool exceptionExits, CancellationToken cts)
     {
         var results = Path.GetFullPath(resultsDirectory);
         Directory.CreateDirectory(results);
@@ -42,7 +42,9 @@ internal static class TestCommand
         await process.WaitForExitAsync(cts);
 
         // report even when tests fail: the coverage of the passing ones is still useful
-        reports.Write(McDcReport.AnalyzeDirectory(results));
-        return process.ExitCode;
+        var modules = McDcReport.AnalyzeDirectory(results);
+        reports.Write(modules);
+        var passed = gate.Check(modules);
+        return process.ExitCode != 0 ? process.ExitCode : passed ? 0 : 1;
     }
 }

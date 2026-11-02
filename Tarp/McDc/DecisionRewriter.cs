@@ -169,6 +169,12 @@ public class DecisionRewriter : CSharpSyntaxRewriter
         {
             case Operator.Parentheses:
                 return Structure(((ParenthesizedExpressionSyntax)e).Expression, conditions);
+            case Operator.Logical when DroppedSide(e) is { } dropped:
+                {
+                    // x is var y && c: only c is a condition
+                    var b = (BinaryExpressionSyntax)e;
+                    return Structure(b.Left == dropped ? b.Right : b.Left, conditions);
+                }
             case Operator.Logical or Operator.BoolBinary:
                 {
                     var b = (BinaryExpressionSyntax)e;
@@ -216,6 +222,33 @@ public class DecisionRewriter : CSharpSyntaxRewriter
                 return "c" + (conditions.Count - 1);
         }
     }
+
+    /*
+     * A condition that's always true (x is var y, x is var _) can never be shown false: as a side of
+     * &&, it isn't a condition (it's evaluated, unmarked), and a decision that's only such conditions
+     * isn't instrumented. The side of e's && that's dropped, if any.
+     */
+    private static ExpressionSyntax? DroppedSide(ExpressionSyntax e) =>
+        e is BinaryExpressionSyntax b && b.IsKind(SyntaxKind.LogicalAndExpression)
+            ? IsAlwaysTrue(b.Left) ? b.Left : IsAlwaysTrue(b.Right) ? b.Right : null
+            : null;
+
+    private static bool IsAlwaysTrue(ExpressionSyntax e) => e switch
+    {
+        ParenthesizedExpressionSyntax p => IsAlwaysTrue(p.Expression),
+        IsPatternExpressionSyntax p => IsAlwaysMatched(p.Pattern),
+        BinaryExpressionSyntax b when b.IsKind(SyntaxKind.LogicalAndExpression) => IsAlwaysTrue(b.Left) && IsAlwaysTrue(b.Right),
+        _ => false
+    };
+
+    // var y, var _ (not var (a, b): a deconstruction can test for null)
+    private static bool IsAlwaysMatched(PatternSyntax pattern) => pattern switch
+    {
+        ParenthesizedPatternSyntax p => IsAlwaysMatched(p.Pattern),
+        VarPatternSyntax { Designation: SingleVariableDesignationSyntax or DiscardDesignationSyntax } => true,
+        DiscardPatternSyntax => true,
+        _ => false
+    };
 
     // and/or at the top of a pattern (under parentheses and not)
     private static bool HasCombinator(PatternSyntax pattern) => pattern switch
@@ -325,6 +358,13 @@ public class DecisionRewriter : CSharpSyntaxRewriter
                 {
                     var p = (ParenthesizedExpressionSyntax)e;
                     return p.WithExpression(Rewrite(p.Expression, id, markers, ref index));
+                }
+            case Operator.Logical when DroppedSide(e) is { } dropped:
+                {
+                    var b = (BinaryExpressionSyntax)e;
+                    var l = b.Left == dropped ? (ExpressionSyntax)base.Visit(b.Left)! : Rewrite(b.Left, id, markers, ref index);
+                    var r = b.Right == dropped ? (ExpressionSyntax)base.Visit(b.Right)! : Rewrite(b.Right, id, markers, ref index);
+                    return b.WithLeft(l).WithRight(r);
                 }
             case Operator.Logical or Operator.BoolBinary:
                 {
@@ -460,6 +500,10 @@ public class DecisionRewriter : CSharpSyntaxRewriter
         if (_model.GetConstantValue(e).HasValue)
         {
             return "constant decision";
+        }
+        if (IsAlwaysTrue(e))
+        {
+            return "always true";
         }
 
         // && / || / ! must be the built-in operators on bool (& | ^ == != ?: are, by OperatorOf)

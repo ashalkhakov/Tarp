@@ -138,7 +138,8 @@ public static class McDcReport
         var lines = (files.Sum(f => f.LinesRun.Count), files.Sum(f => f.Lines.Count));
         var branches = (files.Sum(f => f.BranchesTaken), files.Sum(f => f.Branches));
         var functions = (files.Sum(f => f.Functions.Count(x => x.Entered)), files.Sum(f => f.Functions.Count));
-        var exits = (files.Sum(f => f.Functions.Sum(x => x.ExitsTaken)), files.Sum(f => f.Functions.Sum(x => x.Function.Exits.Count)));
+        var exits = (files.Sum(f => f.Functions.Sum(x => x.ExitsTaken)), files.Sum(f => f.Functions.Sum(x => x.Exits)));
+        var exceptions = (files.Sum(f => f.Functions.Count(x => x.LeftByException == true)), files.Sum(f => f.Functions.Count(x => x.LeftByException != null)));
         var seen = (conditions.Count(c => c.SeenTrue && c.SeenFalse), conditions.Count);
         var mcdc = (conditions.Count(c => c.Covered), conditions.Count);
 
@@ -146,10 +147,16 @@ public static class McDcReport
         sb.AppendLine(Row("Lines", lines, ""));
         sb.AppendLine(Row("Branches", branches, "decision outcomes, switch sections and arms, ??, ?., foreach, catch, finally"));
         sb.AppendLine(Row("Functions", functions, $"entered; exits {exits.Item1}/{exits.Item2}"));
+        if (exceptions.Item2 > 0)
+        {
+            sb.AppendLine(Row("Exceptions", exceptions, ExceptionsNote));
+        }
         sb.AppendLine(Row("Conditions", seen, "seen both true and false"));
         sb.AppendLine(Row("MC/DC", mcdc, "conditions shown to affect their decision"));
         sb.AppendLine();
     }
+
+    public const string ExceptionsNote = "functions an exception left (not counted as gaps)";
 
     private static string Row(string name, (int Covered, int Total) n, string note)
     {

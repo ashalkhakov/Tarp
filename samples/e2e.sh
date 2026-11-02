@@ -60,6 +60,15 @@ grep -E '<line number="12" hits="3" branch="true" condition-coverage="[0-9]+% \(
 grep -F '| MC/DC | 5 | 11 | 45.5% |' report.md
 grep -F '| c0 | `paid` | ✓ | ✗ | **not shown** | `c0=F c1=- c2=F` |' report.md
 grep -F '<td class="gap">not shown</td><td><code>c0=F c1=- c2=F</code></td>' report.html
+# the gate: MC/DC is 5/11 (45.5%); without lines 18 and 24 (four conditions, three not shown), 4/7
+if dotnet tarp mcdc-report -r gate-report.txt --fail-under-mcdc 50 > gate.txt; then
+    echo "error: --fail-under-mcdc 50 passed at 45.5%" >&2
+    exit 1
+fi
+grep -E "MC/DC +5/11 +45\.5%  minimum 50%  FAILED" gate.txt
+printf '# known gaps\nShop.Core/Orders.cs:18\nShop.Core/Orders.cs:24\n' > exclusions.txt
+dotnet tarp mcdc-report -r gate-report.txt --fail-under-mcdc 50 --fail-under-lines 100 --exclusions exclusions.txt | tee gate.txt
+grep -E "MC/DC +4/7 +57\.1%  minimum 50%  ok" gate.txt
 if [ -n "${GENHTML:-}" ]; then
     "$GENHTML" --branch-coverage --mcdc-coverage coverage.info -o html 2>&1 | tee genhtml.txt
     grep -E "lines\.*: 100\.0% \(10 of 10 lines\)" genhtml.txt

@@ -32,7 +32,7 @@ public static class T
     }
 }";
 
-    private static List<ModuleResult> Run()
+    internal static List<ModuleResult> Run()
     {
         var p = McDcEndToEndTests.Build(Source);
         p.Check("Both", true, true);
@@ -42,7 +42,7 @@ public static class T
         return new List<ModuleResult> { new(p.Map, p.Results(), p.Counts()) };
     }
 
-    private static int LineOf(string text) =>
+    internal static int LineOf(string text) =>
         Source.Split('\n').Select((l, i) => (l, i)).Single(x => x.l.Contains(text, StringComparison.Ordinal)).i + 1;
 
     [TestMethod]
