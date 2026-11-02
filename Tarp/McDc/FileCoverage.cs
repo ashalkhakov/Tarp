@@ -25,6 +25,8 @@ public class SwitchCoverage
     public int Taken { get; init; }
     public int Total { get; init; }
     public List<string> NotTaken { get; init; } = new();
+    // each branch's label (a case's labels, an arm's pattern, "no iterations", ...) and whether it was taken
+    public List<(string Label, bool Taken)> Branches { get; init; } = new();
 }
 
 /*
@@ -110,7 +112,8 @@ public class FileCoverage
                 Switch = s,
                 Total = sections.Count,
                 Taken = sections.Count(x => ran.Contains(x.probe)),
-                NotTaken = sections.Where(x => !ran.Contains(x.probe)).Select(x => x.label).ToList()
+                NotTaken = sections.Where(x => !ran.Contains(x.probe)).Select(x => x.label).ToList(),
+                Branches = sections.Select(x => (x.label, ran.Contains(x.probe))).ToList()
             });
         }
 

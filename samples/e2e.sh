@@ -33,7 +33,7 @@ grep -E "^  Lines +10/10 " report.txt
 grep -E "^  Branches +9/10 " report.txt
 grep -E "^  Functions +4/4 .*exits 7/7" report.txt
 grep -E "^  Conditions +6/11 " report.txt
-grep -F "line 24: o is null was only true" report.txt
+grep -F "decision at line 24: outcomes not taken: false (o is null)" report.txt
 # hit counts: CanShip's if ran once per call (three calls)
 grep -F "most run: line 12 (3 times)" report.txt
 # MC/DC
@@ -69,13 +69,15 @@ grep -E "MC/DC +5/11 +45\.5%  minimum 50%  FAILED" gate.txt
 printf '# known gaps\nShop.Core/Orders.cs:18\nShop.Core/Orders.cs:24\n' > exclusions.txt
 dotnet tarp mcdc-report -r gate-report.txt --fail-under-mcdc 50 --fail-under-lines 100 --exclusions exclusions.txt --strict-exclusions | tee gate.txt
 grep -E "MC/DC +4/7 +57\.1%  minimum 50%  ok" gate.txt
-# conditions instead of line 18: its shown id != null is still checked, 5/8. inStock (line 12) is
-# shown, so with --strict-exclusions an entry for it fails the gate
-printf 'Shop.Core/Orders.cs:18 id.Length < 20\nShop.Core/Orders.cs:18 OrderId().IsMatch(id)\nShop.Core/Orders.cs:24\n' > exclusions.txt
-dotnet tarp mcdc-report -r gate-report.txt --fail-under-mcdc 50 --exclusions exclusions.txt --strict-exclusions | tee gate.txt
+# conditions and branches instead of lines: line 18's shown id != null is still checked, 5/8, and of
+# line 24 only its condition and its false outcome are left out, 9/9. inStock (line 12) is shown, so
+# with --strict-exclusions an entry for it fails the gate
+printf 'Shop.Core/Orders.cs:18 id.Length < 20\nShop.Core/Orders.cs:18 OrderId().IsMatch(id)\nShop.Core/Orders.cs:24 o is null\nShop.Core/Orders.cs:24 [false]\n' > exclusions.txt
+dotnet tarp mcdc-report -r gate-report.txt --fail-under-mcdc 50 --fail-under-branches 100 --exclusions exclusions.txt --strict-exclusions | tee gate.txt
+grep -E "Branches +9/9 +100\.0%  minimum 100%  ok" gate.txt
 grep -E "MC/DC +5/8 +62\.5%  minimum 50%  ok" gate.txt
 echo 'Shop.Core/Orders.cs:12 inStock' >> exclusions.txt
-if dotnet tarp mcdc-report -r gate-report.txt --fail-under-mcdc 50 --exclusions exclusions.txt --strict-exclusions > gate.txt; then
+if dotnet tarp mcdc-report -r gate-report.txt --fail-under-mcdc 50 --fail-under-branches 100 --exclusions exclusions.txt --strict-exclusions > gate.txt; then
     echo "error: --strict-exclusions passed with an exclusion that leaves out no gap" >&2
     exit 1
 fi

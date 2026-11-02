@@ -72,6 +72,21 @@ public class CoverageGateTests
         text.Should().Contain(": FAILED, remove them");
     }
 
+    // a branch entry leaves out one branch, named as the text report names it; the other branches on its
+    // line, and its conditions, are still checked
+    [TestMethod]
+    public void ExclusionsOfBranches()
+    {
+        var modules = ReportFormatsTests.Run();
+        var line = ReportFormatsTests.LineOf("switch (x)");
+        McDcReport.Format(modules).Should().Contain($"switch at line {line}: sections not taken: default:");
+
+        var (passed, text) = CoverageGate.Check(modules, new CoverageThresholds(Branches: 100),
+            CoverageExclusions.Parse(new[] { $"T.cs:{line} [default:]", $"T.cs:{line} [case 1:]" }));
+        passed.Should().BeTrue();
+        text.Should().MatchRegex(@"Branches +2/2 +100.0%").And.Contain($"    T.cs:{line} [case 1:]\n").And.NotContain("[default:]\n");
+    }
+
     [TestMethod]
     public void Globs()
     {
