@@ -393,6 +393,34 @@ public sealed class CoverageRewriter : DecisionRewriter
         return rewritten.WithSections(List(sections));
     }
 
+    /*
+     * The line of a case label's when guard, or of a catch filter, has no statement of its own: a probe
+     * there counts the guard's evaluations, so that the line is a line, run as often as its guard was.
+     *
+     *   case p when g:  ->  case p when PT(id) && (g):     catch (E) when (f)  ->  catch (E) when (PT(id) && (f))
+     */
+    public override SyntaxNode? VisitWhenClause(WhenClauseSyntax node)
+    {
+        var rewritten = (WhenClauseSyntax)base.VisitWhenClause(node)!;
+        if (node.Parent is not CasePatternSwitchLabelSyntax label || IsExcludedFromCoverage(node))
+        {
+            return rewritten;
+        }
+        var id = NewProbe(label, label.Span, ProbeEntry.Statement);
+        return rewritten.WithCondition(Probed($"{Runtime}.PT({id}) && __tarpValue", rewritten.Condition));
+    }
+
+    public override SyntaxNode? VisitCatchFilterClause(CatchFilterClauseSyntax node)
+    {
+        var rewritten = (CatchFilterClauseSyntax)base.VisitCatchFilterClause(node)!;
+        if (node.Parent is not CatchClauseSyntax clause || IsExcludedFromCoverage(node))
+        {
+            return rewritten;
+        }
+        var id = NewProbe(clause, TextSpan.FromBounds(clause.CatchKeyword.SpanStart, node.Span.End), ProbeEntry.Statement);
+        return rewritten.WithFilterExpression(Probed($"{Runtime}.PT({id}) && __tarpValue", rewritten.FilterExpression));
+    }
+
     public override SyntaxNode? VisitSwitchSection(SwitchSectionSyntax node)
     {
         var rewritten = (SwitchSectionSyntax)base.VisitSwitchSection(node)!;
