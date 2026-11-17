@@ -9,8 +9,9 @@ From one run of your tests, in source terms (what you wrote, not the compiled IL
 - **Lines**: a probe runs right before each statement, and counts how many times; a statement's lines
   count as run once it has started, so a call that throws doesn't make the lines after it look run. A compound statement's
   probe covers its header (`if (...)`, `switch (...)`); its body has probes of its own. So do the
-  condition of a `do ... while`, lambda bodies, switch expression arms, and field and property
-  initializers: a line belongs to the innermost probe around it, so a lambda or an arm that never ran
+  condition of a `do ... while`, lambda bodies, switch expression arms, field and property
+  initializers, and a case label's `when` guard and a `catch` filter (run as often as the guard was
+  evaluated): a line belongs to the innermost probe around it, so a lambda or an arm that never ran
   shows as not run even when the statement around it did.
 - **Functions**: entered or not, and which exits were taken: `return` and `throw` statements, and the
   end of the body when it can be reached. With `--tarp-exception-exits` (or the MSBuild property
