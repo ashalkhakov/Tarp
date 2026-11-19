@@ -30,7 +30,12 @@ internal class Program
                 cmd.OnExecuteAsync(async (CancellationToken cts) =>
                 {
                     var map = await app.GetRequiredService<McDcProjectInstrumenter>().InstrumentProject(project.Value()!, output.Value()!, cts);
-                    Console.WriteLine($"{map.Decisions.Count} decisions instrumented, {map.Skipped.Count} skipped");
+                    Console.WriteLine($"{map.Decisions.Count} decisions instrumented, {map.Skipped.Count} skipped" +
+                        (map.SkippedFiles.Count == 1 ? ", 1 file not instrumented (left as it is):" : map.SkippedFiles.Count > 1 ? $", {map.SkippedFiles.Count} files not instrumented (left as they are):" : ""));
+                    foreach (var f in map.SkippedFiles)
+                    {
+                        Console.WriteLine($"  {f.File}: {f.Reason}");
+                    }
                 });
             });
 

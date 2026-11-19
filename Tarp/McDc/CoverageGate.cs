@@ -106,6 +106,9 @@ public sealed record CoverageThresholds(double? Lines = null, double? Branches =
  * The coverage gate: fails when lines, branches or MC/DC (conditions shown, as in the reports) are
  * below their minimum, counting without what the exclusions leave out.
  *
+ * A file Tarp couldn't instrument fails it too (its coverage is unknown, so a percentage without it
+ * would pass on what's left), unless a whole-file entry leaves it out.
+ *
  * As a ratchet, the exclusions should only shrink: an entry that leaves out no gap of a checked metric
  * (its code is covered now, or gone) is listed, and with strict, fails the gate.
  */
@@ -199,8 +202,20 @@ public static class CoverageGate
             }
         }
 
+        var unknown = new List<SkippedFile>();
+        foreach (var skipped in modules.SelectMany(m => m.Map.SkippedFiles))
+        {
+            var forFile = exclusions.ForFile(skipped.File);
+            if (forFile.Count > 0)
+            {
+                needed.UnionWith(forFile);
+                continue;
+            }
+            unknown.Add(skipped);
+        }
+
         var sb = new StringBuilder();
-        var passed = true;
+        var passed = unknown.Count == 0;
         sb.Append(CultureInfo.InvariantCulture, $"Tarp: coverage gate{(exclusions.Entries.Count > 0 ? $" ({exclusions.Entries.Count} exclusions)" : "")}\n");
         void Row(string name, int covered, int total, double? minimum)
         {
@@ -217,6 +232,15 @@ public static class CoverageGate
         Row("Lines", linesRun, lines, thresholds.Lines);
         Row("Branches", taken, branches, thresholds.Branches);
         Row("MC/DC", shown, conditions, thresholds.McDc);
+        if (unknown.Count > 0)
+        {
+            sb.Append(CultureInfo.InvariantCulture,
+                $"  {(unknown.Count == 1 ? "1 file" : $"{unknown.Count} files")} not instrumented, coverage unknown: FAILED (exclude a file to accept it):\n");
+            foreach (var f in unknown)
+            {
+                sb.Append(CultureInfo.InvariantCulture, $"    {f.File}  ({f.Reason})\n");
+            }
+        }
 
         var stale = exclusions.Entries.Where(e => !needed.Contains(e)).ToList();
         if (stale.Count > 0)

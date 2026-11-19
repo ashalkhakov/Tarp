@@ -6,6 +6,7 @@ using Microsoft.CodeAnalysis.Text;
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.Globalization;
 using System.IO;
 using System.IO.Abstractions;
 using System.Linq;
@@ -118,6 +119,13 @@ public class McDcBuildInstrumenter
 
         var trees = new List<SyntaxTree>();
         var toInstrument = new List<(SyntaxTree Tree, string Identity)>();
+        var leftOut = new List<SkippedFile>();
+        // a warning in MSBuild's canonical format, so the build shows it as one
+        void LeaveOut(string fullPath, string reason)
+        {
+            leftOut.Add(new SkippedFile { File = DisplayPath(request, fullPath), Reason = reason });
+            log.WriteLine($"{fullPath}: warning TARP001: not instrumented, its coverage is unknown: {reason}");
+        }
         foreach (var (identity, fullPath) in request.Sources)
         {
             if (!fileSystem.File.Exists(fullPath))
@@ -134,7 +142,7 @@ public class McDcBuildInstrumenter
             }
             if (tree.GetDiagnostics().Any(d => d.Severity == DiagnosticSeverity.Error))
             {
-                log.WriteLine($"Tarp: not instrumenting {fullPath}: it doesn't parse with Tarp's C# version");
+                LeaveOut(fullPath, "it doesn't parse with Tarp's C# version");
                 continue;
             }
             toInstrument.Add((tree, identity));
@@ -195,19 +203,22 @@ public class McDcBuildInstrumenter
             if (!progress)
             {
                 // excluding everything around the errors didn't help: leave those files alone
-                foreach (var file in newErrors.Select(e => e.Location.GetMappedLineSpan().Path).Distinct())
+                foreach (var errors in newErrors.GroupBy(e => e.Location.GetMappedLineSpan().Path))
                 {
-                    toInstrument.RemoveAll(t => t.Tree.FilePath == file);
-                    log.WriteLine($"Tarp: not instrumenting {file}: instrumentation breaks its compilation");
+                    toInstrument.RemoveAll(t => t.Tree.FilePath == errors.Key);
+                    var first = errors.First();
+                    LeaveOut(errors.Key, $"instrumentation breaks its compilation ({first.Id} at line {first.Location.GetMappedLineSpan().StartLinePosition.Line + 1}: {first.GetMessage(CultureInfo.InvariantCulture)})");
                 }
             }
         }
 
         map.ModuleId = ModuleId(request, map);
         map.Name = request.AssemblyName;
+        map.SkippedFiles = leftOut;
         WriteOutputs(request, map, rewritten, toInstrument);
 
-        log.WriteLine($"Tarp: {request.AssemblyName}: {map.Decisions.Count} decisions instrumented, {map.Skipped.Count} skipped");
+        log.WriteLine($"Tarp: {request.AssemblyName}: {map.Decisions.Count} decisions instrumented, {map.Skipped.Count} skipped" +
+            (leftOut.Count == 1 ? ", 1 file not instrumented" : leftOut.Count > 1 ? $", {leftOut.Count} files not instrumented" : ""));
         return map;
     }
 

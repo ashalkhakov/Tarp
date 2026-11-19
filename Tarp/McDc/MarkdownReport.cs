@@ -73,6 +73,18 @@ public static class MarkdownReport
             }
         }
 
+        var skippedFiles = modules.SelectMany(m => m.Map.SkippedFiles).ToList();
+        if (skippedFiles.Count > 0)
+        {
+            Line(Invariant($"**Not instrumented: {(skippedFiles.Count == 1 ? "1 file" : $"{skippedFiles.Count} files")}**, coverage unknown:"));
+            Line();
+            foreach (var f in skippedFiles)
+            {
+                Line($"- {Code(f.File)} ({f.Reason})");
+            }
+            Line();
+        }
+
         var skipped = modules.SelectMany(m => m.Map.Skipped).ToList();
         if (skipped.Count > 0)
         {

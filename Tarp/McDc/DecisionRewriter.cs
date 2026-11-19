@@ -76,23 +76,50 @@ public class DecisionRewriter : CSharpSyntaxRewriter
         return base.Visit(node);
     }
 
-    private readonly Dictionary<SyntaxNode, bool> _excludedMembers = new();
+    /*
+     * In an interpolation hole the first ':' outside parentheses starts the format, so a rewritten
+     * expression that starts with global:: ($"{global::TarpGen.McDc.PN(...) ?? ...}") would end there:
+     * a hole that changed is parenthesized. The alignment and format stay outside ({(...),5:N2}).
+     */
+    public override SyntaxNode? VisitInterpolation(InterpolationSyntax node)
+    {
+        var rewritten = (InterpolationSyntax)base.VisitInterpolation(node)!;
+        if (rewritten.Expression == node.Expression || rewritten.Expression is ParenthesizedExpressionSyntax)
+        {
+            return rewritten;
+        }
+        return rewritten.WithExpression(ParenthesizedExpression(rewritten.Expression.WithoutTrivia()).WithTriviaFrom(rewritten.Expression));
+    }
 
-    // [ExcludeFromCodeCoverage] on the member, accessor, local function or type the node is in (or is)
+    private readonly Dictionary<SyntaxNode, bool> _excludedFromCoverage = new();
+
+    /*
+     * Not covered: what's in a member, accessor, local function or type with [ExcludeFromCodeCoverage],
+     * and code the compiler leaves out of the program. That's a call it removes, arguments and all: one to
+     * a [Conditional] method none of whose symbols are defined (Debug.Assert in a release build, a
+     * contract's Ensures(r => ...)), or to a partial method without an implementation. It's also the body
+     * of such a [Conditional] method, which the project's own calls never reach.
+     */
     protected bool IsExcludedFromCoverage(SyntaxNode e)
     {
         foreach (var a in e.AncestorsAndSelf())
         {
-            if (a is not (MemberDeclarationSyntax or AccessorDeclarationSyntax or LocalFunctionStatementSyntax))
+            if (a is not (MemberDeclarationSyntax or AccessorDeclarationSyntax or LocalFunctionStatementSyntax or InvocationExpressionSyntax
+                or ExpressionStatementSyntax { Expression: InvocationExpressionSyntax }))
             {
                 continue;
             }
-            if (!_excludedMembers.TryGetValue(a, out var excluded))
+            if (!_excludedFromCoverage.TryGetValue(a, out var excluded))
             {
-                var symbol = _model.GetDeclaredSymbol(a);
-                excluded = symbol != null && symbol.GetAttributes().Any(x =>
-                    x.AttributeClass?.ToDisplayString() == "System.Diagnostics.CodeAnalysis.ExcludeFromCodeCoverageAttribute");
-                _excludedMembers[a] = excluded;
+                excluded = a switch
+                {
+                    InvocationExpressionSyntax call => IsRemoved(call),
+                    ExpressionStatementSyntax statement => IsRemoved((InvocationExpressionSyntax)statement.Expression),
+                    _ => _model.GetDeclaredSymbol(a) is { } symbol && (symbol.GetAttributes().Any(x =>
+                        x.AttributeClass?.ToDisplayString() == "System.Diagnostics.CodeAnalysis.ExcludeFromCodeCoverageAttribute") ||
+                        symbol is IMethodSymbol method && IsConditionallyOmitted(method))
+                };
+                _excludedFromCoverage[a] = excluded;
             }
             if (excluded)
             {
@@ -100,6 +127,53 @@ public class DecisionRewriter : CSharpSyntaxRewriter
             }
         }
         return false;
+    }
+
+    private bool IsRemoved(InvocationExpressionSyntax call) =>
+        _model.GetSymbolInfo(call).Symbol is IMethodSymbol method &&
+        (IsConditionallyOmitted(method) || method.IsPartialDefinition && method.PartialImplementationPart == null && method.ReturnsVoid);
+
+    // the compiler's rule: [Conditional] (an override's comes from the method it overrides), none of its
+    // symbols defined
+    private bool IsConditionallyOmitted(IMethodSymbol method)
+    {
+        var symbols = new List<string>();
+        for (var m = method.ReducedFrom ?? method; m != null; m = m.OverriddenMethod)
+        {
+            symbols.AddRange(m.GetAttributes()
+                .Where(x => x.AttributeClass?.ToDisplayString() == "System.Diagnostics.ConditionalAttribute")
+                .Select(x => x.ConstructorArguments.FirstOrDefault().Value as string)
+                .OfType<string>());
+        }
+        return symbols.Count > 0 && !symbols.Any(Defines.Contains);
+    }
+
+    private HashSet<string>? _defines;
+
+    // the project's symbols, and the file's #define and #undef (they're all at its start)
+    private HashSet<string> Defines
+    {
+        get
+        {
+            if (_defines == null)
+            {
+                var tree = _model.SyntaxTree;
+                _defines = new HashSet<string>(tree.Options.PreprocessorSymbolNames, System.StringComparer.Ordinal);
+                foreach (var d in tree.GetRoot().GetFirstToken(includeZeroWidth: true).LeadingTrivia.Select(t => t.GetStructure()))
+                {
+                    switch (d)
+                    {
+                        case DefineDirectiveTriviaSyntax define:
+                            _defines.Add(define.Name.ValueText);
+                            break;
+                        case UndefDirectiveTriviaSyntax undef:
+                            _defines.Remove(undef.Name.ValueText);
+                            break;
+                    }
+                }
+            }
+            return _defines;
+        }
     }
 
     /*
