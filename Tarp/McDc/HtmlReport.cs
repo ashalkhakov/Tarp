@@ -68,6 +68,17 @@ public static class HtmlReport
             FormatFile(sb, i, files[i].Key, files[i].ToList());
         }
 
+        var skippedFiles = modules.SelectMany(m => m.Map.SkippedFiles).ToList();
+        if (skippedFiles.Count > 0)
+        {
+            Line(Invariant($"<p class=\"gap\"><strong>Not instrumented: {(skippedFiles.Count == 1 ? "1 file" : $"{skippedFiles.Count} files")}</strong>, coverage unknown:</p><ul>"));
+            foreach (var f in skippedFiles)
+            {
+                Line($"<li><code>{E(f.File)}</code> ({E(f.Reason)})</li>");
+            }
+            Line("</ul>");
+        }
+
         var skipped = modules.SelectMany(m => m.Map.Skipped).ToList();
         if (skipped.Count > 0)
         {

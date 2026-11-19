@@ -87,6 +87,24 @@ public class CoverageGateTests
         text.Should().MatchRegex(@"Branches +2/2 +100.0%").And.Contain($"    T.cs:{line} [case 1:]\n").And.NotContain("[default:]\n");
     }
 
+    // #20: a file Tarp left out has unknown coverage: it fails the gate unless a whole-file entry accepts it
+    [TestMethod]
+    public void FilesNotInstrumentedFailTheGate()
+    {
+        var modules = ReportFormatsTests.Run();
+        modules[0].Map.SkippedFiles.Add(new SkippedFile { File = "Lib/Labels.cs", Reason = "instrumentation breaks its compilation" });
+
+        var (passed, text) = CoverageGate.Check(modules, new CoverageThresholds(Lines: 0), CoverageExclusions.None);
+        passed.Should().BeFalse();
+        text.Should().Contain("1 file not instrumented, coverage unknown: FAILED").And.Contain("    Lib/Labels.cs  (instrumentation breaks its compilation)");
+        McDcReport.Format(modules).Should().Contain("1 file not instrumented").And.Contain("Lib/Labels.cs: the whole file, its coverage is unknown");
+        MarkdownReport.Format(modules).Should().Contain("**Not instrumented: 1 file**");
+
+        (passed, text) = CoverageGate.Check(modules, new CoverageThresholds(Lines: 0), CoverageExclusions.Parse(new[] { "Lib/*.cs" }), strict: true);
+        passed.Should().BeTrue();
+        text.Should().NotContain("no gap");
+    }
+
     [TestMethod]
     public void Globs()
     {

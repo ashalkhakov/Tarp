@@ -171,6 +171,8 @@ public static class Rules
 
         map.Decisions.Should().ContainSingle();
         File.ReadAllLines(Output("replaced.txt")).Should().Equal("Rules.cs");
-        log.ToString().Should().Contain("not instrumenting").And.Contain("Future.cs");
+        // a warning MSBuild shows as one, and in the map, for the reports and the gate
+        log.ToString().Should().Contain($"{Path.Combine(_project, "Future.cs")}: warning TARP001: not instrumented, its coverage is unknown");
+        map.SkippedFiles.Select(f => f.File).Should().Equal("Proj/Future.cs");
     }
 }

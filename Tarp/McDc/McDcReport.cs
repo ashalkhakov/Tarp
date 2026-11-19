@@ -102,6 +102,7 @@ public static class McDcReport
 
         var results = modules.SelectMany(m => m.Decisions).ToList();
         var skipped = modules.SelectMany(m => m.Map.Skipped).ToList();
+        var skippedFiles = modules.SelectMany(m => m.Map.SkippedFiles).ToList();
 
         foreach (var r in results)
         {
@@ -114,12 +115,16 @@ public static class McDcReport
         var percent = conditions.Count == 0 ? 100.0 : 100.0 * shown / conditions.Count;
 
         sb.AppendLine(CultureInfo.InvariantCulture,
-            $"Summary: {results.Count} decisions ({notExecuted} never executed), {shown}/{conditions.Count} conditions shown ({percent:0.0}%), {skipped.Count} decisions not instrumented");
+            $"Summary: {results.Count} decisions ({notExecuted} never executed), {shown}/{conditions.Count} conditions shown ({percent:0.0}%), {skipped.Count} decisions not instrumented{(skippedFiles.Count > 0 ? $", {(skippedFiles.Count == 1 ? "1 file" : $"{skippedFiles.Count} files")} not instrumented" : "")}");
 
-        if (skipped.Count > 0)
+        if (skipped.Count > 0 || skippedFiles.Count > 0)
         {
             sb.AppendLine();
             sb.AppendLine("Not instrumented:");
+            foreach (var f in skippedFiles)
+            {
+                sb.AppendLine(CultureInfo.InvariantCulture, $"  {f.File}: the whole file, its coverage is unknown  ({f.Reason})");
+            }
             foreach (var s in skipped)
             {
                 sb.AppendLine(CultureInfo.InvariantCulture, $"  {s.File}:{s.Line}:{s.Column}  {OneLine(s.Text)}  ({s.Reason})");

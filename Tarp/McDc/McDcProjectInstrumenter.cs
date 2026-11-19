@@ -4,7 +4,10 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.MSBuild;
 using System;
+using System.Collections.Generic;
+using System.Globalization;
 using System.IO.Abstractions;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -50,9 +53,8 @@ public class McDcProjectInstrumenter
         var compilation = await project.GetCompilationAsync(cts).ConfigureAwait(false)
             ?? throw new InvalidOperationException($"could not compile {projectFilePath}");
 
-        var map = new McDcMap { ModuleId = Guid.NewGuid().ToString("N"), Name = project.AssemblyName };
         var baseDir = fileSystem.Path.GetDirectoryName(project.FilePath)!;
-
+        var documents = new List<(Document Document, string RelativePath, SyntaxTree Tree)>();
         foreach (var document in project.Documents)
         {
             var relativePath = fileSystem.Path.GetRelativePath(baseDir, document.FilePath!);
@@ -65,16 +67,71 @@ public class McDcProjectInstrumenter
             {
                 throw new NotSupportedException($"{document.FilePath} is outside the project directory");
             }
+            documents.Add((document, relativePath, (await document.GetSyntaxTreeAsync(cts).ConfigureAwait(false))!));
+        }
 
-            var tree = await document.GetSyntaxTreeAsync(cts).ConfigureAwait(false);
-            var model = compilation.GetSemanticModel(tree!);
-            map.Sources[relativePath.Replace('\\', '/')] = document.FilePath!;
-            var rewriter = new CoverageRewriter(model, map, relativePath.Replace('\\', '/'));
-            var root = (CompilationUnitSyntax)rewriter.Visit(await tree!.GetRootAsync(cts).ConfigureAwait(false))!;
+        // as in the build: a file whose instrumentation doesn't compile is left as it is, and reported
+        static (string, int, string) Key(Diagnostic d) => (d.Location.GetMappedLineSpan().Path, d.Location.GetMappedLineSpan().StartLinePosition.Line, d.Id);
+        var originalErrors = compilation.GetDiagnostics(cts).Where(d => d.Severity == DiagnosticSeverity.Error).Select(Key).ToHashSet();
+        var leftOut = new List<SkippedFile>();
+        McDcMap map;
+        Dictionary<SyntaxTree, string> rewritten;
+        while (true)
+        {
+            map = new McDcMap { ModuleId = Guid.NewGuid().ToString("N"), Name = project.AssemblyName };
+            rewritten = new Dictionary<SyntaxTree, string>();
+            foreach (var (document, relativePath, tree) in documents.Where(d => leftOut.All(l => l.File != d.RelativePath.Replace('\\', '/'))))
+            {
+                var model = compilation.GetSemanticModel(tree);
+                map.Sources[relativePath.Replace('\\', '/')] = document.FilePath!;
+                var rewriter = new CoverageRewriter(model, map, relativePath.Replace('\\', '/'));
+                var root = (CompilationUnitSyntax)rewriter.Visit(await tree.GetRootAsync(cts).ConfigureAwait(false))!;
+                rewritten[tree] = WithPrologue(root, document.FilePath!, compilation.Options.NullableContextOptions).ToFullString();
+            }
 
+            var check = compilation.AddSyntaxTrees(CSharpSyntaxTree.ParseText(McDcRuntimeSource.Generate("check", "", map.Probes.Count), (CSharpParseOptions)documents[0].Tree.Options, cancellationToken: cts));
+            var instrumented = new List<SyntaxTree>();
+            foreach (var (tree, text) in rewritten)
+            {
+                var parsed = CSharpSyntaxTree.ParseText(text, (CSharpParseOptions)tree.Options, tree.FilePath + ".tarp.cs", cancellationToken: cts);
+                check = check.ReplaceSyntaxTree(tree, parsed);
+                instrumented.Add(parsed);
+            }
+            var newErrors = instrumented.SelectMany(t => check.GetSemanticModel(t).GetDiagnostics(cancellationToken: cts))
+                .Where(d => d.Severity == DiagnosticSeverity.Error && !originalErrors.Contains(Key(d)))
+                .ToList();
+            if (newErrors.Count == 0)
+            {
+                break;
+            }
+            var before = leftOut.Count;
+            foreach (var errors in newErrors.GroupBy(e => e.Location.GetMappedLineSpan().Path))
+            {
+                var file = documents.Where(d => d.Document.FilePath == errors.Key).Select(d => d.RelativePath.Replace('\\', '/')).FirstOrDefault();
+                if (file == null || leftOut.Any(l => l.File == file))
+                {
+                    continue;
+                }
+                var first = errors.First();
+                leftOut.Add(new SkippedFile
+                {
+                    File = file,
+                    Reason = $"instrumentation breaks its compilation ({first.Id} at line {first.Location.GetMappedLineSpan().StartLinePosition.Line + 1}: {first.GetMessage(CultureInfo.InvariantCulture)})"
+                });
+            }
+            // errors outside the project's files (the runtime): nothing more to leave out
+            if (leftOut.Count == before)
+            {
+                break;
+            }
+        }
+        map.SkippedFiles = leftOut;
+
+        foreach (var (document, relativePath, tree) in documents)
+        {
             var newPath = fileSystem.Path.Combine(outputDir, relativePath);
             fileSystem.Directory.CreateDirectory(fileSystem.Path.GetDirectoryName(newPath)!);
-            fileSystem.File.WriteAllText(newPath, WithPrologue(root, document.FilePath!, compilation.Options.NullableContextOptions).ToFullString());
+            fileSystem.File.WriteAllText(newPath, rewritten.TryGetValue(tree, out var text) ? text : (await tree.GetTextAsync(cts).ConfigureAwait(false)).ToString());
         }
 
         fileSystem.File.WriteAllText(

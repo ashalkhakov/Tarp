@@ -14,6 +14,8 @@ public class McDcMap
     public string Name { get; set; } = "";
     public List<DecisionEntry> Decisions { get; set; } = new();
     public List<SkippedDecision> Skipped { get; set; } = new();
+    // files left out of instrumentation altogether: their coverage is unknown (the gate fails on them)
+    public List<SkippedFile> SkippedFiles { get; set; } = new();
     // line, function and switch coverage (see CoverageRewriter)
     public List<ProbeEntry> Probes { get; set; } = new();
     public List<FunctionEntry> Functions { get; set; } = new();
@@ -58,6 +60,12 @@ public class SkippedDecision
     public int Column { get; set; }
     public int SpanStart { get; set; }
     public string Text { get; set; } = "";
+    public string Reason { get; set; } = "";
+}
+
+public class SkippedFile
+{
+    public string File { get; set; } = "";
     public string Reason { get; set; } = "";
 }
 
